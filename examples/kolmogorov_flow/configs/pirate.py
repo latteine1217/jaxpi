@@ -8,29 +8,44 @@ def get_config():
     config = ml_collections.ConfigDict()
 
     config.mode = "train"
+    config.transfer_learning = True  # 論文配置：使用 transfer learning 初始化參數
+    config.transfer_optimizer_state = False  # 是否傳遞完整優化器狀態（預設False保持向後相容）
 
     # Weights & Biases
     config.wandb = wandb = ml_collections.ConfigDict()
     wandb.project = "PINN-Kolmogorov_flow"
     wandb.name = "pirate"
-    wandb.tag = None
+    wandb.group = "optimizer_comparison"  # 實驗分組方便比較
+    wandb.tags = ["adam", "pirate", "2gpu", "Re10000", "paper_aligned", "L=2", "hidden_dim=768"]  # 標籤
+    wandb.notes = "論文對齊配置：Adam optimizer, L=2 (9 layers), hidden_dim=768, swish activation, transfer_learning=True"  # 備註
+    wandb.sweep_id = None  # Sweep ID (超參數調優時自動填入)
 
     # Arch
     config.arch = arch = ml_collections.ConfigDict()
     arch.arch_name = "PirateNet"
-    arch.num_layers = 3
-    arch.hidden_dim = 256
+    arch.num_layers = 4  # 論文配置：2 residual blocks (對應 9 個 Dense layers)
+    arch.hidden_dim = 384  # 論文配置：淺而寬的設計（參數量 ~4.7M）
     arch.out_dim = 3
-    arch.activation = "tanh"
+    arch.activation = "swish"  # 論文配置：使用 Swish activation
     arch.periodicity = ml_collections.ConfigDict(
         {"period": (2 * jnp.pi, 2 * jnp.pi), "axis": (1, 2), "trainable": (False, False)}
     )
-    arch.fourier_emb = ml_collections.ConfigDict({"embed_scale": 2.0, "embed_dim": 256})
+    arch.fourier_emb = ml_collections.ConfigDict({"embed_scale": 2.0, "embed_dim": 384})  # embed_dim = hidden_dim // 2
     arch.reparam = ml_collections.ConfigDict(
         {"type": "weight_fact", "mean": 1.0, "stddev": 0.1}
     )
     arch.nonlinearity = 0.0
     arch.pi_init = None
+
+    # Data
+    config.time_fraction = 1.0
+    config.dataset_path = "examples/kolmogorov_flow/data/kolmogorov_dns/kolmogorov_dns_10000.npy"
+    config.dns_time_range = None
+    config.dns_time_stride = 1
+    config.sensor_json = None
+    config.sensor_values = None
+    config.sensor_batch_size_per_device = None
+    config.sensor_time_shift = True
 
     # Optim
     config.optim = optim = ml_collections.ConfigDict()
@@ -49,14 +64,23 @@ def get_config():
     # Training
     config.training = training = ml_collections.ConfigDict()
     training.max_steps = 20000
-    training.batch_size_per_device = 8192
+    training.batch_size_per_device = 4096  # 雙 GPU 安全配置
     training.num_time_windows = 10
 
     # Weighting
     config.weighting = weighting = ml_collections.ConfigDict()
     weighting.scheme = "grad_norm"
     weighting.init_weights = ml_collections.ConfigDict(
-        {"u_ic": 100.0, "v_ic": 100.0, "ru": 1.0, "rv": 1.0, "rc":1.0}
+        {
+            "u_ic": 100.0,
+            "v_ic": 100.0,
+            "ru": 1.0,
+            "rv": 1.0,
+            "rc": 1.0,
+            "u_data": 0.0,
+            "v_data": 0.0,
+            "w_data": 0.0,
+        }
     )
     weighting.momentum = 0.9
     weighting.update_every_steps = 1000
@@ -65,10 +89,16 @@ def get_config():
     weighting.causal_tol = 1.0
     weighting.num_chunks = 16
 
+    # Memory Optimization（記憶體優化配置）
+    config.optimization = optimization = ml_collections.ConfigDict()
+    optimization.use_vmap_chunking = False  # 啟用 vmap 分塊優化（建議 GPU < 16GB 時啟用）
+    optimization.vmap_chunk_size = 512      # vmap 分塊大小（僅當 use_vmap_chunking=True 時生效）
+    optimization.use_eval_checkpoint = False  # 評估時使用 gradient checkpointing（極度記憶體受限時啟用）
+
     # Logging
     config.logging = logging = ml_collections.ConfigDict()
     logging.log_every_steps = 100
-    logging.log_errors = True
+    logging.log_errors = False  # 訓練時關閉以提升效能（評估時可開啟）
     logging.log_losses = True
     logging.log_weights = True
     logging.log_lr = False
@@ -77,11 +107,17 @@ def get_config():
     logging.log_ntk = False
     logging.log_nonlinearities = False
     logging.log_cossim = False
+    logging.eval_time_samples = 8  # 已優化：預設會使用 min(100, actual_size)
+    logging.eval_space_samples = 8192  # 已優化：預設會使用 min(4096, actual_size)
+    logging.eval_time_chunk_seconds = 1.0
+    logging.eval_space_chunk_size = 4096
 
     # Saving
     config.saving = saving = ml_collections.ConfigDict()
     saving.save_every_steps = 10000
     saving.num_keep_ckpts = 2
+    saving.ckpt_dir = None
+    saving.overwrite = True
 
     # # Input shape for initializing Flax models
     config.input_dim = 3
@@ -89,4 +125,48 @@ def get_config():
     # Integer for PRNG random seed.
     config.seed = 42
 
+    # 驗證配置的一致性
+    _validate_config(config)
+
     return config
+
+
+def _validate_config(config):
+    """
+    驗證配置參數的一致性，特別是多 GPU 環境下的 batch size 和 num_chunks 的關係
+
+    注意：從嚴格錯誤改為警告，因為 train.py 會自動調整 batch size
+    """
+    import warnings
+    batch_size_per_device = config.training.batch_size_per_device
+    num_chunks = config.weighting.num_chunks
+
+    # 檢查 1：batch_size_per_device 最好能被 num_chunks 整除
+    if batch_size_per_device % num_chunks != 0:
+        warnings.warn(
+            f"batch_size_per_device ({batch_size_per_device}) is not divisible by "
+            f"num_chunks ({num_chunks}). It will be auto-adjusted during training to "
+            f"{(batch_size_per_device // num_chunks) * num_chunks} for proper causal weighting."
+        )
+
+    # 檢查 2：只有在 use_causal = True 時才需要檢查 num_chunks
+    if not config.weighting.use_causal and num_chunks > 1:
+        import warnings
+        warnings.warn(
+            f"use_causal is False but num_chunks is {num_chunks}. "
+            "num_chunks will be ignored since causal weighting is disabled."
+        )
+
+    # 檢查 3：Fourier embedding dimension 應該是 hidden_dim 的一半
+    if config.arch.fourier_emb is not None:
+        embed_dim = config.arch.fourier_emb.embed_dim
+        hidden_dim = config.arch.hidden_dim
+        if embed_dim != hidden_dim // 2:
+            import warnings
+            warnings.warn(
+                f"Fourier embed_dim ({embed_dim}) is not hidden_dim // 2 ({hidden_dim // 2}). "
+                "This may affect network performance."
+            )
+
+    print(f"✓ Configuration validated: batch_size_per_device={batch_size_per_device}, num_chunks={num_chunks}")
+    print(f"  Each chunk will contain {batch_size_per_device // num_chunks} samples per device")

@@ -66,8 +66,10 @@ class PeriodEmbs(nn.Module):
         Apply the period embeddings to the specified axes.
         """
         y = []
+        last_dim = x.shape[-1]
 
-        for i, xi in enumerate(x):
+        for i in range(last_dim):
+            xi = x[..., i : i + 1]
             if i in self.axis:
                 idx = self.axis.index(i)
                 period = self.period_params[f"period_{idx}"]
@@ -75,21 +77,23 @@ class PeriodEmbs(nn.Module):
             else:
                 y.append(xi)
 
-        return jnp.hstack(y)
+        return jnp.concatenate(y, axis=-1)
 
 
 class FourierEmbs(nn.Module):
     embed_scale: float
     embed_dim: int
+    input_dim: int
 
     @nn.compact
     def __call__(self, x):
         kernel = self.param(
-            "kernel", normal(self.embed_scale), (x.shape[-1], self.embed_dim // 2)
+            "kernel",
+            normal(self.embed_scale),
+            (self.input_dim, self.embed_dim // 2),
         )
-        y = jnp.concatenate(
-            [jnp.cos(jnp.dot(x, kernel)), jnp.sin(jnp.dot(x, kernel))], axis=-1
-        )
+        proj = jnp.dot(x, kernel)
+        y = jnp.concatenate([jnp.cos(proj), jnp.sin(proj)], axis=-1)
         return y
 
 
@@ -99,12 +103,19 @@ class Embedding(nn.Module):
 
     @nn.compact
     def __call__(self, x):
+        orig_shape = x.shape[:-1]
+        x = jnp.reshape(x, (-1, x.shape[-1]))
+
         if self.periodicity:
             x = PeriodEmbs(**self.periodicity)(x)
 
         if self.fourier_emb:
-            x = FourierEmbs(**self.fourier_emb)(x)
+            fourier_cfg = dict(self.fourier_emb)
+            if "input_dim" not in fourier_cfg:
+                fourier_cfg["input_dim"] = x.shape[-1]
+            x = FourierEmbs(**fourier_cfg)(x)
 
+        x = jnp.reshape(x, orig_shape + (x.shape[-1],))
         return x
 
 
@@ -132,6 +143,10 @@ class Dense(nn.Module):
                 (x.shape[-1], self.features),
             )
             kernel = g * v
+        else:
+            kernel = self.param(
+                "kernel", self.kernel_init, (x.shape[-1], self.features)
+            )
 
         bias = self.param("bias", self.bias_init, (self.features,))
 

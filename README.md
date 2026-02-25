@@ -6,7 +6,20 @@ This branch contains the  code for [paper](https://arxiv.org/abs/2402.00326): Pi
 
 ## Usage
 
-The usage instructions for this branch are consistent with those in the main branch. Please refer to the main branch documentation for detailed setup and execution guidelines.
+### Install
+
+```bash
+uv venv
+uv pip install -e .
+```
+
+### Run (example)
+
+```bash
+uv run python examples/allen_cahn/train.py
+```
+
+For GPU/TPU, follow the official JAX installation guide for your platform and CUDA version.
 
 ## Benchmarks
 

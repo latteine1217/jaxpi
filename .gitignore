@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.DS_Store
+
+.venv/
+.env/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+build/
+dist/
+
+.ipynb_checkpoints/
+
+# Large experiment artifacts
+logs/
+soap_Re10000_220260120/
+examples/kolmogorov_flow/data/kolmogorov_dns/
+examples/kolmogorov_flow/data/kolmogorov_les/

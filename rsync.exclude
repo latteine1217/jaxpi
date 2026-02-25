@@ -1,0 +1,8 @@
+# python 環境
+.venv/
+
+# 訓練檢查
+logs/
+
+# 文檔
+*.md 

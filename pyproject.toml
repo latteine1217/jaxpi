@@ -1,0 +1,79 @@
+[project]
+name = "jaxpi"
+version = "0.0.2"
+description = "A library of Physics-Informed Neural Networks (PINNs) models in JAX Flax"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Sifan Wang" },
+    { name = "Shyam Sankaran" },
+    { name = "Hanwen Wang" },
+]
+
+dependencies = [
+    "absl-py",
+    "flax",
+    "jax[cuda12]",
+    "jaxlib",
+    "matplotlib",
+    "ml_collections",
+    "numpy",
+    "optax",
+    "scipy",
+    "wandb",
+    "torch",
+    "tabulate",
+    "soap-jax @ git+https://github.com/haydn-jones/SOAP_JAX.git",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[project.urls]
+Homepage = "https://github.com/PredictiveIntelligenceLab/JAX-PI"
+Repository = "https://github.com/PredictiveIntelligenceLab/JAX-PI"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q"
+testpaths = ["tests"]
+xfail_strict = true
+filterwarnings = [
+    "error",
+    "ignore:.*distutils.*:DeprecationWarning",
+    "ignore:.*setuptools.*:DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [".venv", "dist", "build"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "B",
+    "UP",
+]
+ignore = [
+    "E501",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["jaxpi"]
+
+[tool.hatchling.build.targets.wheel]
+packages = ["jaxpi"]
+
+[tool.hatch.metadata]
+allow-direct-references = true

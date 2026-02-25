@@ -5,7 +5,7 @@ from flax.training import train_state
 from flax import jax_utils
 
 import jax.numpy as jnp
-from jax import lax, jit, grad, pmap, random, tree_map, jacfwd, jacrev
+from jax import lax, jit, grad, pmap, random, jacfwd, jacrev
 from jax.tree_util import tree_map, tree_reduce, tree_leaves
 
 import optax
@@ -13,8 +13,21 @@ import optax
 from jaxpi import archs
 from jaxpi.utils import flatten_pytree
 
-from soap_jax import soap  # Install from https://github.com/haydn-jones/SOAP_JAX
-from psgd_jax.kron import kron
+# Apply compatibility patch for soap_jax before importing it
+try:
+    from jaxpi import optax_soap_patch  # Patch for optax 0.1.9 compatibility
+except ImportError:
+    pass  # Patch module not found, continue anyway
+
+try:
+    from soap_jax import soap  # Install from https://github.com/haydn-jones/SOAP_JAX
+except ImportError:  # Optional dependency
+    soap = None
+
+try:
+    from psgd_jax.kron import kron
+except ImportError:  # Optional dependency
+    kron = None
 
 
 class TrainState(train_state.TrainState):
@@ -94,6 +107,11 @@ def _create_optimizer(config):
         tx = soap(
             learning_rate=lr, b1=config.beta1, b2=config.beta2, weight_decay=0.0, precondition_frequency=2
             )
+        # 論文要求：SOAP + gradient clipping (global norm = 1.0)
+        tx = optax.chain(
+            optax.clip_by_global_norm(1.0),
+            tx
+        )
 
 
     elif config.optimizer == "Kron":
@@ -125,7 +143,8 @@ def _create_optimizer(config):
             learning_rate=lr
         )
 
-    if config.schedule_free:
+    # SOAP 本身就是 schedule-free optimizer，不需要額外 wrapper
+    if config.schedule_free and config.optimizer != "Soap":
         tx = optax.chain(
             optax.clip_by_global_norm(1.0),
             optax.contrib.schedule_free(tx, lr, b1=config.beta1)
@@ -138,10 +157,32 @@ def _create_optimizer(config):
     return lr, tx
 
 
-def _create_train_state(config, params=None, weights=None):
+def _create_train_state(
+    config, params=None, weights=None, opt_state=None, step=None, replicate=True
+):
+    """
+    建立TrainState，支援可選的優化器狀態遷移
+    
+    Parameters
+    ----------
+    config : ml_collections.ConfigDict
+        訓練配置
+    params : Optional[FrozenDict]
+        模型參數（若為None則隨機初始化）
+    weights : Optional[Dict]
+        損失權重
+    opt_state : Optional[optax.OptState]
+        優化器狀態（若提供則直接使用，否則初始化）
+    step : Optional[int]
+        訓練步數（若為None則從0開始）
+    
+    Returns
+    -------
+    TrainState (replicated across devices)
+    """
     # Initialize network
     arch = _create_arch(config.arch)
-    x = jnp.ones(config.input_dim)
+    x = jnp.ones((1, config.input_dim))
 
     # Initialize optax optimizer
     lr, tx = _create_optimizer(config.optim)
@@ -152,21 +193,58 @@ def _create_train_state(config, params=None, weights=None):
     if weights is None:
         weights = dict(config.weighting.init_weights)
 
-    state = TrainState.create(
-        apply_fn=arch.apply,
-        params=params,
-        tx=tx,
-        weights=weights,
-        momentum=config.weighting.momentum,
-    )
+    # 核心分支：根據是否提供opt_state選擇建立方式
+    if opt_state is not None:
+        # 路徑A：使用提供的opt_state（遷移學習）
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("建立TrainState並使用提供的opt_state（遷移學習模式）")
+        
+        # 方案1：嘗試直接構造
+        try:
+            state = TrainState(
+                step=step if step is not None else 0,
+                apply_fn=arch.apply,
+                params=params,
+                tx=tx,
+                opt_state=opt_state,
+                weights=weights,
+                momentum=config.weighting.momentum,
+            )
+        except TypeError as e:
+            # 方案2：若不支援直接構造，使用replace()
+            logger.warning(f"直接構造TrainState失敗: {e}")
+            logger.info("回退至TrainState.create() + replace()")
+            temp_state = TrainState.create(
+                apply_fn=arch.apply,
+                params=params,
+                tx=tx,
+                weights=weights,
+                momentum=config.weighting.momentum,
+            )
+            state = temp_state.replace(
+                opt_state=opt_state,
+                step=step if step is not None else 0
+            )
+    else:
+        # 路徑B：標準初始化（現有行為）
+        state = TrainState.create(
+            apply_fn=arch.apply,
+            params=params,
+            tx=tx,
+            weights=weights,
+            momentum=config.weighting.momentum,
+        )
 
-    return jax_utils.replicate(state)
+    if replicate:
+        return jax_utils.replicate(state)
+    return state
 
 
 class PINN:
-    def __init__(self, config):
+    def __init__(self, config, replicate_state=True):
         self.config = config
-        self.state = _create_train_state(config)
+        self.state = _create_train_state(config, replicate=replicate_state)
 
     def u_net(self, params, *args):
         raise NotImplementedError("Subclasses should implement this!")
@@ -239,8 +317,8 @@ class PINN:
 
 
 class ForwardIVP(PINN):
-    def __init__(self, config):
-        super().__init__(config)
+    def __init__(self, config, replicate_state=True):
+        super().__init__(config, replicate_state=replicate_state)
 
         if config.weighting.use_causal:
             self.tol = config.weighting.causal_tol

@@ -1,0 +1,59 @@
+# Wandb Sweep 配置文件 - Kolmogorov Flow 超參數調優
+# 使用方法: 
+#   1. wandb sweep examples/kolmogorov_flow/configs/sweep_config.yaml
+#   2. wandb agent <entity>/<project>/<sweep-id>
+
+program: main.py
+method: bayes  # 貝葉斯優化 (bayes, grid, random)
+metric:
+  name: u_error
+  goal: minimize
+
+parameters:
+  # Optimizer 學習率
+  learning_rate:
+    distribution: log_uniform_values
+    min: 0.0001
+    max: 0.01
+  
+  # Warmup steps
+  warmup_steps:
+    values: [1000, 2000, 5000]
+  
+  # 網路容量
+  hidden_dim:
+    values: [128, 256, 384, 512]
+  
+  # 網路深度
+  num_layers:
+    values: [2, 3, 4, 5]
+  
+  # Batch size (需配合 GPU 記憶體)
+  batch_size_per_device:
+    values: [2048, 3072, 4096]
+  
+  # Causal weighting tolerance
+  causal_tol:
+    distribution: uniform
+    min: 0.5
+    max: 2.0
+
+# 固定參數（不參與調優）
+command:
+  - ${env}
+  - python3
+  - ${program}
+  - "--config=./configs/pirate.py"
+  - "--workdir=."
+  - ${args_no_hyphens}
+
+# Early termination
+early_terminate:
+  type: hyperband
+  min_iter: 3
+  eta: 2
+  s: 2
+
+# Sweep 設定
+name: kolmogorov_flow_hyperparameter_sweep
+description: "PIRATE optimizer hyperparameter sweep for Kolmogorov Flow"
