@@ -19,8 +19,23 @@ python3 examples/kolmogorov_flow/evaluate_checkpoint.py \
   --window 10
 ```
 
+```bash
+python3 examples/kolmogorov_flow/evaluate_checkpoint.py \
+  --config soap \
+  --checkpoint_path ./runs/kf_soap/ckpt \
+  --mode final_step \
+  --device cpu
+```
+
 ## 驗證重點
 
 - 同一物理時間點再做模型比較。
 - 同時檢查 `u/v/w` 三個誤差，不只看單一指標。
 - 記錄 checkpoint step、窗口範圍、資料來源。
+
+## 訓練期誤差記錄（`log_errors=True`）
+
+- full-series 誤差採固定 chunk 計算：
+- `logging.eval_time_chunk_size`：每個時間塊的步數（優先）
+- `logging.eval_time_chunk_seconds`：若未設定 `eval_time_chunk_size`，用秒數換算步數
+- `logging.eval_space_chunk_size`：每個空間塊的點數

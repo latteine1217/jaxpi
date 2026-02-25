@@ -8,8 +8,7 @@ import scipy
 
 import jax
 import jax.numpy as jnp
-from jax import random, vmap
-from jax import vmap, jacrev
+from jax import random, vmap, jacrev
 from jax.tree_util import tree_map
 
 from flax import jax_utils

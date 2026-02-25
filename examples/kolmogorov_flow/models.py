@@ -117,34 +117,42 @@ class NavierStokes(ForwardIVP):
             predictions : array, shape (num_time, num_space)
                 預測結果
             """
-            num_time = t_array.shape[0]
             num_space = x_array.shape[0]
 
-            # 計算需要的分塊數
+            # 使用固定分塊形狀，避免 traced 區域的 Python for-loop
             num_chunks = (num_space + chunk_size - 1) // chunk_size
+            pad_space = num_chunks * chunk_size - num_space
+
+            if pad_space > 0:
+                x_padded = jnp.pad(x_array, (0, pad_space), mode="constant")
+                y_padded = jnp.pad(y_array, (0, pad_space), mode="constant")
+            else:
+                x_padded = x_array
+                y_padded = y_array
+
+            x_chunks = jnp.reshape(x_padded, (num_chunks, chunk_size))
+            y_chunks = jnp.reshape(y_padded, (num_chunks, chunk_size))
+
+            valid_mask = jnp.concatenate(
+                [
+                    jnp.ones((num_space,), dtype=jnp.bool_),
+                    jnp.zeros((pad_space,), dtype=jnp.bool_),
+                ]
+            )
+            mask_chunks = jnp.reshape(valid_mask, (num_chunks, chunk_size))
 
             def process_time_step(t_single):
                 """處理單個時間步的所有空間點（分塊）"""
-                # 初始化結果陣列
-                results = []
-
-                for chunk_idx in range(num_chunks):
-                    start_idx = chunk_idx * chunk_size
-                    end_idx = jnp.minimum(start_idx + chunk_size, num_space)
-
-                    # 取得當前分塊的空間座標
-                    x_chunk = x_array[start_idx:end_idx]
-                    y_chunk = y_array[start_idx:end_idx]
-
-                    # 使用單層 vmap 處理空間分塊（可控記憶體）
-                    chunk_pred = vmap(net_fn, (None, None, 0, 0))(
+                def space_scan(_, xs):
+                    x_chunk, y_chunk, mask_chunk = xs
+                    pred_chunk = vmap(net_fn, (None, None, 0, 0))(
                         params, t_single, x_chunk, y_chunk
                     )
+                    pred_chunk = pred_chunk * mask_chunk.astype(pred_chunk.dtype)
+                    return None, pred_chunk
 
-                    results.append(chunk_pred)
-
-                # 合併所有分塊結果
-                return jnp.concatenate(results, axis=0)
+                _, pred_chunks = lax.scan(space_scan, None, (x_chunks, y_chunks, mask_chunks))
+                return jnp.reshape(pred_chunks, (-1,))[:num_space]
 
             # 使用 lax.scan 處理時間維度（記憶體高效）
             def scan_body(carry, t_single):
@@ -342,6 +350,178 @@ class NavierStokes(ForwardIVP):
         w_error = jnp.linalg.norm(w_pred - w_ref) / jnp.linalg.norm(w_ref)
 
         return u_error, v_error, w_error
+
+    def _compute_l2_error_time_space_chunked_impl(
+        self,
+        params,
+        t,
+        coords,
+        u_ref,
+        v_ref,
+        w_ref,
+        time_chunk_size,
+        space_chunk_size,
+    ):
+        """
+        以固定 time/space 分塊計算全時序 L2 誤差。
+
+        Why:
+            以固定尺寸 chunk + lax.scan 取代 Python while/for，
+            讓評估路徑可 JIT/pjit 化並減少 host-device 來回。
+        """
+        num_time = t.shape[0]
+        num_space = coords.shape[0]
+
+        num_time_chunks = (num_time + time_chunk_size - 1) // time_chunk_size
+        num_space_chunks = (num_space + space_chunk_size - 1) // space_chunk_size
+        pad_time = num_time_chunks * time_chunk_size - num_time
+        pad_space = num_space_chunks * space_chunk_size - num_space
+
+        if pad_time > 0:
+            t_padded = jnp.pad(t, (0, pad_time), mode="edge")
+        else:
+            t_padded = t
+
+        if pad_time > 0 or pad_space > 0:
+            u_padded = jnp.pad(u_ref, ((0, pad_time), (0, pad_space)), mode="constant")
+            v_padded = jnp.pad(v_ref, ((0, pad_time), (0, pad_space)), mode="constant")
+            w_padded = jnp.pad(w_ref, ((0, pad_time), (0, pad_space)), mode="constant")
+            coords_padded = jnp.pad(coords, ((0, pad_space), (0, 0)), mode="constant")
+        else:
+            u_padded = u_ref
+            v_padded = v_ref
+            w_padded = w_ref
+            coords_padded = coords
+
+        t_chunks = jnp.reshape(t_padded, (num_time_chunks, time_chunk_size))
+        coords_chunks = jnp.reshape(coords_padded, (num_space_chunks, space_chunk_size, 2))
+
+        u_time_space_chunks = jnp.reshape(
+            u_padded,
+            (num_time_chunks, time_chunk_size, num_space_chunks, space_chunk_size),
+        )
+        v_time_space_chunks = jnp.reshape(
+            v_padded,
+            (num_time_chunks, time_chunk_size, num_space_chunks, space_chunk_size),
+        )
+        w_time_space_chunks = jnp.reshape(
+            w_padded,
+            (num_time_chunks, time_chunk_size, num_space_chunks, space_chunk_size),
+        )
+
+        time_mask = jnp.concatenate(
+            [
+                jnp.ones((num_time,), dtype=jnp.bool_),
+                jnp.zeros((pad_time,), dtype=jnp.bool_),
+            ]
+        )
+        space_mask = jnp.concatenate(
+            [
+                jnp.ones((num_space,), dtype=jnp.bool_),
+                jnp.zeros((pad_space,), dtype=jnp.bool_),
+            ]
+        )
+        time_mask_chunks = jnp.reshape(time_mask, (num_time_chunks, time_chunk_size))
+        space_mask_chunks = jnp.reshape(space_mask, (num_space_chunks, space_chunk_size))
+
+        dtype = u_ref.dtype
+        init_carry = (
+            jnp.array(0.0, dtype=dtype),
+            jnp.array(0.0, dtype=dtype),
+            jnp.array(0.0, dtype=dtype),
+            jnp.array(0.0, dtype=dtype),
+            jnp.array(0.0, dtype=dtype),
+            jnp.array(0.0, dtype=dtype),
+        )
+
+        def time_scan(carry, xs):
+            total_u, total_v, total_w, denom_u, denom_v, denom_w = carry
+            t_chunk, time_mask_chunk, u_chunk, v_chunk, w_chunk = xs
+
+            # 將空間塊移到第一維，便於 scan
+            u_space_first = jnp.swapaxes(u_chunk, 0, 1)
+            v_space_first = jnp.swapaxes(v_chunk, 0, 1)
+            w_space_first = jnp.swapaxes(w_chunk, 0, 1)
+
+            def space_scan(space_carry, space_xs):
+                su, sv, sw, du, dv, dw = space_carry
+                coords_chunk, space_mask_chunk, u_local, v_local, w_local = space_xs
+
+                u_pred = self.u_pred_fn(params, t_chunk, coords_chunk[:, 0], coords_chunk[:, 1])
+                v_pred = self.v_pred_fn(params, t_chunk, coords_chunk[:, 0], coords_chunk[:, 1])
+                w_pred = self.w_pred_fn(params, t_chunk, coords_chunk[:, 0], coords_chunk[:, 1])
+
+                valid = jnp.logical_and(time_mask_chunk[:, None], space_mask_chunk[None, :])
+                valid = valid.astype(u_pred.dtype)
+
+                u_diff = (u_pred - u_local) * valid
+                v_diff = (v_pred - v_local) * valid
+                w_diff = (w_pred - w_local) * valid
+                u_valid = u_local * valid
+                v_valid = v_local * valid
+                w_valid = w_local * valid
+
+                su = su + jnp.sum(u_diff**2)
+                sv = sv + jnp.sum(v_diff**2)
+                sw = sw + jnp.sum(w_diff**2)
+                du = du + jnp.sum(u_valid**2)
+                dv = dv + jnp.sum(v_valid**2)
+                dw = dw + jnp.sum(w_valid**2)
+                return (su, sv, sw, du, dv, dw), None
+
+            (total_u, total_v, total_w, denom_u, denom_v, denom_w), _ = lax.scan(
+                space_scan,
+                (total_u, total_v, total_w, denom_u, denom_v, denom_w),
+                (
+                    coords_chunks,
+                    space_mask_chunks,
+                    u_space_first,
+                    v_space_first,
+                    w_space_first,
+                ),
+            )
+            return (total_u, total_v, total_w, denom_u, denom_v, denom_w), None
+
+        (total_u, total_v, total_w, denom_u, denom_v, denom_w), _ = lax.scan(
+            time_scan,
+            init_carry,
+            (
+                t_chunks,
+                time_mask_chunks,
+                u_time_space_chunks,
+                v_time_space_chunks,
+                w_time_space_chunks,
+            ),
+        )
+
+        eps = jnp.array(jnp.finfo(dtype).eps, dtype=dtype)
+        u_error = jnp.sqrt(total_u / jnp.maximum(denom_u, eps))
+        v_error = jnp.sqrt(total_v / jnp.maximum(denom_v, eps))
+        w_error = jnp.sqrt(total_w / jnp.maximum(denom_w, eps))
+        return u_error, v_error, w_error
+
+    @partial(jit, static_argnums=(0, 7, 8))
+    def compute_l2_error_time_space_chunked(
+        self,
+        params,
+        t,
+        coords,
+        u_ref,
+        v_ref,
+        w_ref,
+        time_chunk_size,
+        space_chunk_size,
+    ):
+        return self._compute_l2_error_time_space_chunked_impl(
+            params,
+            t,
+            coords,
+            u_ref,
+            v_ref,
+            w_ref,
+            time_chunk_size,
+            space_chunk_size,
+        )
 
     def compute_l2_error_time_chunked(
         self,

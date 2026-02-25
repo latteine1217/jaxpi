@@ -769,30 +769,43 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
             )
             return
         state = jax.device_get(model.state) if num_devices > 1 else model.state
-        chunk_seconds = config.logging.get("eval_time_chunk_seconds", 1.0)
+        chunk_seconds = float(config.logging.get("eval_time_chunk_seconds", 1.0))
+        time_chunk_size = config.logging.get("eval_time_chunk_size", None)
+        if time_chunk_size is None:
+            if t_star.shape[0] > 1:
+                dt = float(np.asarray(t_star[1] - t_star[0]))
+                if dt > 0:
+                    time_chunk_size = max(1, int(chunk_seconds / dt))
+                else:
+                    time_chunk_size = 1
+            else:
+                time_chunk_size = 1
+        time_chunk_size = int(time_chunk_size)
+        if time_chunk_size < 1:
+            time_chunk_size = 1
+        space_chunk = int(config.logging.get("eval_space_chunk_size", 4096))
+        if space_chunk < 1:
+            space_chunk = 4096
 
         if num_devices > 1:
             mesh = parallel_state["mesh"]
             coords_sharding = jax.sharding.NamedSharding(mesh, P("data", None))
             space_sharding = jax.sharding.NamedSharding(mesh, P(None, "data"))
-            space_chunk = config.logging.get("eval_space_chunk_size", 4096)
 
-            def _eval_chunk(params, t_chunk, coords_local, u_local, v_local, w_local):
-                u_pred = model.u_pred_fn(params, t_chunk, coords_local[:, 0], coords_local[:, 1])
-                v_pred = model.v_pred_fn(params, t_chunk, coords_local[:, 0], coords_local[:, 1])
-                w_pred = model.w_pred_fn(params, t_chunk, coords_local[:, 0], coords_local[:, 1])
-
-                total_u = jnp.sum((u_pred - u_local) ** 2)
-                total_v = jnp.sum((v_pred - v_local) ** 2)
-                total_w = jnp.sum((w_pred - w_local) ** 2)
-                denom_u = jnp.sum(u_local**2)
-                denom_v = jnp.sum(v_local**2)
-                denom_w = jnp.sum(w_local**2)
-
-                return total_u, total_v, total_w, denom_u, denom_v, denom_w
+            def _eval_full(params, t_all, coords_all, u_all, v_all, w_all):
+                return model._compute_l2_error_time_space_chunked_impl(
+                    params,
+                    t_all,
+                    coords_all,
+                    u_all,
+                    v_all,
+                    w_all,
+                    time_chunk_size=time_chunk_size,
+                    space_chunk_size=space_chunk,
+                )
 
             pjit_eval = pjit(
-                _eval_chunk,
+                _eval_full,
                 in_shardings=(
                     parallel_state["replicated_sharding"],
                     parallel_state["replicated_sharding"],
@@ -805,75 +818,35 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
                     parallel_state["replicated_sharding"],
                     parallel_state["replicated_sharding"],
                     parallel_state["replicated_sharding"],
-                    parallel_state["replicated_sharding"],
-                    parallel_state["replicated_sharding"],
-                    parallel_state["replicated_sharding"],
                 ),
             )
 
-            t_values = np.asarray(t_star)
-            total_u = jnp.array(0.0)
-            total_v = jnp.array(0.0)
-            total_w = jnp.array(0.0)
-            denom_u = jnp.array(0.0)
-            denom_v = jnp.array(0.0)
-            denom_w = jnp.array(0.0)
+            t_dev = jax.device_put(t_star, parallel_state["replicated_sharding"])
+            coords_dev = jax.device_put(coords, coords_sharding)
+            u_dev = jax.device_put(u_ref, space_sharding)
+            v_dev = jax.device_put(v_ref, space_sharding)
+            w_dev = jax.device_put(w_ref, space_sharding)
 
-            start = 0
-            time_count = t_values.shape[0]
-            while start < time_count:
-                t0 = t_values[start]
-                end = start + 1
-                while end < time_count and (t_values[end] - t0) < chunk_seconds:
-                    end += 1
-
-                t_chunk = t_star[start:end]
-                t_dev = jax.device_put(t_chunk, parallel_state["replicated_sharding"])
-
-                space_count = coords.shape[0]
-                for s_start in range(0, space_count, space_chunk):
-                    s_end = min(space_count, s_start + space_chunk)
-                    coords_chunk = coords[s_start:s_end, :]
-                    u_chunk = u_ref[start:end, s_start:s_end]
-                    v_chunk = v_ref[start:end, s_start:s_end]
-                    w_chunk = w_ref[start:end, s_start:s_end]
-
-                    coords_dev = jax.device_put(coords_chunk, coords_sharding)
-                    u_dev = jax.device_put(u_chunk, space_sharding)
-                    v_dev = jax.device_put(v_chunk, space_sharding)
-                    w_dev = jax.device_put(w_chunk, space_sharding)
-
-                    with mesh:
-                        out = pjit_eval(
-                            state.params,
-                            t_dev,
-                            coords_dev,
-                            u_dev,
-                            v_dev,
-                            w_dev,
-                        )
-                    out_host = jax.device_get(out)
-                    total_u = total_u + jnp.sum(out_host[0])
-                    total_v = total_v + jnp.sum(out_host[1])
-                    total_w = total_w + jnp.sum(out_host[2])
-                    denom_u = denom_u + jnp.sum(out_host[3])
-                    denom_v = denom_v + jnp.sum(out_host[4])
-                    denom_w = denom_w + jnp.sum(out_host[5])
-
-                start = end
-
-            u_error = jnp.sqrt(total_u) / jnp.sqrt(denom_u)
-            v_error = jnp.sqrt(total_v) / jnp.sqrt(denom_v)
-            w_error = jnp.sqrt(total_w) / jnp.sqrt(denom_w)
+            with mesh:
+                u_error, v_error, w_error = pjit_eval(
+                    state.params,
+                    t_dev,
+                    coords_dev,
+                    u_dev,
+                    v_dev,
+                    w_dev,
+                )
+            u_error, v_error, w_error = jax.device_get((u_error, v_error, w_error))
         else:
-            u_error, v_error, w_error = model.compute_l2_error_time_chunked(
+            u_error, v_error, w_error = model.compute_l2_error_time_space_chunked(
                 state.params,
                 t_star,
                 coords,
                 u_ref,
                 v_ref,
                 w_ref,
-                chunk_seconds=chunk_seconds,
+                time_chunk_size=time_chunk_size,
+                space_chunk_size=space_chunk,
             )
 
         wandb.log(
