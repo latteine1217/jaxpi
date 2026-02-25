@@ -22,12 +22,11 @@ python3 examples/kolmogorov_flow/evaluate_checkpoint.py \
 ```
 
 ```bash
-# 低記憶體模式（只評估每窗口最後一步）
+# 只評估每窗口最後一步
 python3 examples/kolmogorov_flow/evaluate_checkpoint.py \
   --config soap \
   --checkpoint_path ./runs/kf_soap/ckpt \
-  --mode final_step \
-  --device cpu
+  --mode final_step
 ```
 
 ## 專案重點
@@ -45,9 +44,25 @@ python3 examples/kolmogorov_flow/evaluate_checkpoint.py \
 
 ## 近期更新
 
-- `examples/kolmogorov_flow/evaluate_checkpoint.py` 已整合 CPU/GPU 與模式切換，使用 `--mode`、`--device` 控制。
+- `examples/kolmogorov_flow/evaluate_checkpoint.py` 已整合模式切換，使用 `--mode`、`--device` 控制（`auto/gpu`）。
 - 訓練結束的 full-series 誤差評估改為固定 chunk 的 JAX 掃描路徑（降低 host-device 來回）。
 - 一次性分析腳本集中到 `scripts/analysis/`。
+
+## 分析腳本（scripts/analysis）
+
+```bash
+# 時間對齊比較（需提供兩組 checkpoint 根目錄）
+python3 scripts/analysis/time_aligned_comparison.py \
+  --pirate-checkpoint-base ./runs/pirate/ckpt \
+  --soap-checkpoint-base ./runs/soap/ckpt \
+  --output ./runs/time_aligned_comparison.npz
+```
+
+```bash
+# 檢查 DNS 資料並輸出 vorticity GIF
+python3 scripts/analysis/check_dns_data.py \
+  --data-path examples/kolmogorov_flow/data/kolmogorov_dns/kolmogorov_dns_10000.npy
+```
 
 ## 備註
 

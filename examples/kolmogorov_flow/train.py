@@ -1,12 +1,11 @@
 import time
 import os
 from contextlib import nullcontext
-from functools import partial
 
 from absl import logging
 
 import jax
-from jax import random, lax, jit
+from jax import random, jit
 import jax.numpy as jnp
 from jax.tree_util import tree_map
 from jax.experimental.pjit import pjit
@@ -14,8 +13,6 @@ from jax.sharding import PartitionSpec as P
 
 import numpy as np
 
-np.random.seed(0)
-import scipy.io
 import ml_collections
 import wandb
 
@@ -25,93 +22,6 @@ from jaxpi.models import _create_train_state
 
 import models
 from utils import get_dataset
-
-from jaxpi.samplers import BaseSampler, SpaceSampler
-
-
-class ICSampler(SpaceSampler):
-    def __init__(self, u, v, w, coords, batch_size, rng_key=random.PRNGKey(1234)):
-        super().__init__(coords, batch_size, rng_key)
-
-        self.u = u
-        self.v = v
-        self.w = w
-
-    def __getitem__(self, index):
-        self.key, subkey = random.split(self.key)
-        return self.data_generation(subkey)
-
-    def data_generation(self, key):
-        "Generates data containing batch_size samples"
-        idx = random.choice(key, self.coords.shape[0], shape=(self.batch_size,))
-
-        coords_batch = self.coords[idx, :]
-        u_batch = self.u[idx]
-        v_batch = self.v[idx]
-        w_batch = self.w[idx]
-
-        batch = (coords_batch, u_batch, v_batch, w_batch)
-
-        return batch
-
-
-class LocalUniformSampler(BaseSampler):
-    def __init__(self, dom, batch_size, rng_key=random.PRNGKey(1234)):
-        super().__init__(batch_size, rng_key)
-        self.dom = dom
-        self.dim = dom.shape[0]
-
-    def __getitem__(self, index):
-        self.key, subkey = random.split(self.key)
-        return self.data_generation(subkey)
-
-    def data_generation(self, key):
-        "Generates data containing batch_size samples"
-        batch = random.uniform(
-            key,
-            shape=(self.batch_size, self.dim),
-            minval=self.dom[:, 0],
-            maxval=self.dom[:, 1],
-        )
-        return batch
-
-
-class SensorSampler(BaseSampler):
-    def __init__(
-        self,
-        time_values,
-        coords,
-        u_values,
-        v_values,
-        w_values,
-        batch_size,
-        rng_key=random.PRNGKey(1234),
-    ):
-        super().__init__(batch_size, rng_key)
-        self.time_values = time_values
-        self.coords = coords
-        self.u_values = u_values
-        self.v_values = v_values
-        self.w_values = w_values
-
-    def __getitem__(self, index):
-        self.key, subkey = random.split(self.key)
-        return self.data_generation(subkey)
-
-    def data_generation(self, key):
-        "Generates data containing batch_size samples"
-        key_time, key_space = random.split(key)
-        time_idx = random.choice(key_time, self.time_values.shape[0], shape=(self.batch_size,))
-        sensor_idx = random.choice(key_space, self.coords.shape[0], shape=(self.batch_size,))
-
-        t_batch = self.time_values[time_idx]
-        coords_batch = self.coords[sensor_idx, :]
-        u_batch = self.u_values[sensor_idx, time_idx]
-        v_batch = self.v_values[sensor_idx, time_idx]
-        w_batch = self.w_values[sensor_idx, time_idx]
-
-        batch = (t_batch, coords_batch, u_batch, v_batch, w_batch)
-        return batch
 
 
 class JaxSampler:
@@ -147,13 +57,13 @@ def _build_uniform_sampler(dom, batch_size):
     return _sample
 
 
-def _build_ic_sampler(coords, u, v, w, batch_size):
+def _build_ic_sampler(coords, u, v, w, batch_size, rng_seed):
     coords = np.asarray(coords)
     u = np.asarray(u)
     v = np.asarray(v)
     w = np.asarray(w)
 
-    rng = np.random.default_rng(1234)
+    rng = np.random.default_rng(rng_seed)
 
     def _sample():
         idx = rng.integers(0, coords.shape[0], size=batch_size)
@@ -166,14 +76,22 @@ def _build_ic_sampler(coords, u, v, w, batch_size):
     return _sample
 
 
-def _build_sensor_sampler(time_values, coords, u_values, v_values, w_values, batch_size):
+def _build_sensor_sampler(
+    time_values,
+    coords,
+    u_values,
+    v_values,
+    w_values,
+    batch_size,
+    rng_seed,
+):
     time_values = np.asarray(time_values)
     coords = np.asarray(coords)
     u_values = np.asarray(u_values)
     v_values = np.asarray(v_values)
     w_values = np.asarray(w_values)
 
-    rng = np.random.default_rng(1234)
+    rng = np.random.default_rng(rng_seed)
 
     def _sample():
         time_idx = rng.integers(0, time_values.shape[0], size=batch_size)
@@ -705,7 +623,14 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
                     model.state = jax.device_put(model.state, parallel_state["replicated_sharding"])
 
         # Initialize the samplers
-        ics_sample_fn = _build_ic_sampler(coords, u0, v0, w0, global_batch_size * 2)
+        ics_sample_fn = _build_ic_sampler(
+            coords,
+            u0,
+            v0,
+            w0,
+            global_batch_size * 2,
+            rng_seed=config.seed + idx * 10 + 1,
+        )
         res_sample_fn = _build_uniform_sampler(dom, global_batch_size)
 
         samplers = {
@@ -721,6 +646,7 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
                 v_star.T,
                 w_star.T,
                 sensor_global_batch_size,
+                rng_seed=config.seed + idx * 10 + 3,
             )
             samplers["data"] = HostSampler(sensor_sample_fn)
         elif sensor_data is not None:
@@ -744,6 +670,7 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
                     sensor_data["v"][:, time_mask],
                     sensor_data["w"][:, time_mask],
                     sensor_global_batch_size,
+                    rng_seed=config.seed + idx * 10 + 4,
                 )
                 samplers["data"] = HostSampler(sensor_sample_fn)
 

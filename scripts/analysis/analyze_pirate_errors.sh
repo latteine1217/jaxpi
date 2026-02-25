@@ -1,7 +1,20 @@
 #!/bin/bash
 # 從 PIRATE 訓練日誌中提取各個時間窗口的誤差統計
 
-LOG_FILE=~/jaxpi/logs/kf_pirate_2gpu_2578.err
+set -euo pipefail
+
+LOG_FILE="${1:-}"
+NUM_WINDOWS="${2:-10}"
+
+if [ -z "$LOG_FILE" ]; then
+    echo "用法: $0 <log_file> [num_windows]"
+    exit 1
+fi
+
+if [ ! -f "$LOG_FILE" ]; then
+    echo "找不到日誌檔案: $LOG_FILE"
+    exit 1
+fi
 
 echo "========================================="
 echo "PIRATE 訓練誤差分析"
@@ -11,13 +24,13 @@ echo "從訓練日誌提取: $LOG_FILE"
 echo ""
 
 # 提取各個 Window 的最後幾個誤差記錄
-for window in {1..10}; do
+for ((window = 1; window <= NUM_WINDOWS; window++)); do
     echo "========================================="
     echo "Time Window $window"
     echo "========================================="
     
     # 找到這個 window 的訓練區間
-    if [ $window -lt 10 ]; then
+    if [ $window -lt "$NUM_WINDOWS" ]; then
         next_window=$((window + 1))
         grep -A 200 "Training time window $window" $LOG_FILE | \
         grep -B 200 "Training time window $next_window" | \
@@ -57,7 +70,7 @@ for window in {1..10}; do
     # 計算平均誤差
     echo ""
     echo "最後 1000 iterations 平均誤差:"
-    if [ $window -lt 10 ]; then
+    if [ $window -lt "$NUM_WINDOWS" ]; then
         next_window=$((window + 1))
         grep -A 200 "Training time window $window" $LOG_FILE | \
         grep -B 200 "Training time window $next_window" | \
@@ -99,8 +112,8 @@ echo "========================================="
 printf "%-10s %-15s %-15s %-15s\n" "Window" "u_error" "v_error" "w_error"
 echo "---------------------------------------------------------------"
 
-for window in {1..10}; do
-    if [ $window -lt 10 ]; then
+for ((window = 1; window <= NUM_WINDOWS; window++)); do
+    if [ $window -lt "$NUM_WINDOWS" ]; then
         next_window=$((window + 1))
         result=$(grep -A 200 "Training time window $window" $LOG_FILE | \
         grep -B 200 "Training time window $next_window" | \

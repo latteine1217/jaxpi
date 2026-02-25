@@ -23,8 +23,7 @@ python3 examples/kolmogorov_flow/evaluate_checkpoint.py \
 python3 examples/kolmogorov_flow/evaluate_checkpoint.py \
   --config soap \
   --checkpoint_path ./runs/kf_soap/ckpt \
-  --mode final_step \
-  --device cpu
+  --mode final_step
 ```
 
 ## 驗證重點
@@ -32,6 +31,7 @@ python3 examples/kolmogorov_flow/evaluate_checkpoint.py \
 - 同一物理時間點再做模型比較。
 - 同時檢查 `u/v/w` 三個誤差，不只看單一指標。
 - 記錄 checkpoint step、窗口範圍、資料來源。
+- `--device` 僅支援 `auto` 或 `gpu`。
 
 ## 訓練期誤差記錄（`log_errors=True`）
 

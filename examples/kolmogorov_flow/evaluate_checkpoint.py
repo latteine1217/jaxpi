@@ -3,11 +3,10 @@
 
 模式：
 1. window：評估整個時間窗口（原 evaluate_checkpoint.py）
-2. final_step：只評估每個窗口最後一個時間點（整合原 simple/cpu）
+2. final_step：只評估每個窗口最後一個時間點（整合原 simple）
 
 設備：
 - auto：由 JAX 自動選擇
-- cpu：強制使用 CPU
 - gpu：強制使用 GPU
 """
 
@@ -29,15 +28,38 @@ if THIS_DIR not in sys.path:
 
 def configure_device(device: str) -> None:
     """在匯入 JAX 相關模組前設定執行裝置。"""
-    if device == "cpu":
-        os.environ["JAX_PLATFORMS"] = "cpu"
-    elif device == "gpu":
+    if device == "gpu":
         os.environ["JAX_PLATFORMS"] = "gpu"
     elif device == "auto":
         # 保持 JAX 預設策略
         pass
     else:
-        raise ValueError(f"Unknown device option: {device}")
+        raise ValueError(f"Unknown device option: {device}, choices are: auto, gpu")
+
+
+def resolve_eval_chunk_sizes(logging_config, t_values: np.ndarray) -> tuple[int, int]:
+    """解析評估使用的 time/space chunk 大小。"""
+    time_chunk_size = getattr(logging_config, "eval_time_chunk_size", None)
+    if time_chunk_size is None:
+        chunk_seconds = float(getattr(logging_config, "eval_time_chunk_seconds", 1.0))
+        if t_values.size > 1:
+            t_sorted = np.sort(t_values)
+            dt = float(t_sorted[1] - t_sorted[0])
+            if dt > 0:
+                time_chunk_size = max(1, int(chunk_seconds / dt))
+            else:
+                time_chunk_size = 1
+        else:
+            time_chunk_size = 1
+    time_chunk_size = int(time_chunk_size)
+    if time_chunk_size < 1:
+        time_chunk_size = 1
+
+    space_chunk_size = int(getattr(logging_config, "eval_space_chunk_size", 4096))
+    if space_chunk_size < 1:
+        space_chunk_size = 4096
+
+    return time_chunk_size, space_chunk_size
 
 
 def load_config(config_name: str):
@@ -100,8 +122,6 @@ def evaluate_checkpoint(
     configure_device(device)
 
     # 延後匯入，確保 device 設定先套用
-    import jax.numpy as jnp
-
     from jaxpi.utils import restore_checkpoint
     from examples.kolmogorov_flow.utils import get_dataset
     from examples.kolmogorov_flow import models
@@ -159,12 +179,7 @@ def evaluate_checkpoint(
         v0 = v_ref[start_idx, :]
         w0 = w_ref[start_idx, :]
 
-        # CPU final_step 模式可只保留窗口首尾時間，降低建模記憶體壓力
-        if mode == "final_step" and device == "cpu":
-            model_t = jnp.asarray([t_window[0], t_window[-1]])
-        else:
-            model_t = t_window
-
+        model_t = t_window
         model = models.NavierStokes(config, model_t, coords, u0, v0, w0, nu)
 
         ckpt_dir = os.path.join(checkpoint_path, f"time_window_{window_idx}")
@@ -178,18 +193,22 @@ def evaluate_checkpoint(
         print(f"checkpoint: {ckpt_dir}/checkpoint_{max_step}")
         model.state = restore_checkpoint(model.state, ckpt_dir, step=max_step)
 
-        chunk_seconds = getattr(config.logging, "eval_time_chunk_seconds", 1.0)
+        time_chunk_size, space_chunk_size = resolve_eval_chunk_sizes(
+            config.logging,
+            np.asarray(t_window),
+        )
 
         if mode == "window":
             print("running full-window L2 error ...")
-            u_error, v_error, w_error = model.compute_l2_error_time_chunked(
+            u_error, v_error, w_error = model.compute_l2_error_time_space_chunked(
                 model.state.params,
                 t_window,
                 coords,
                 u_ref_window,
                 v_ref_window,
                 w_ref_window,
-                chunk_seconds=chunk_seconds,
+                time_chunk_size=time_chunk_size,
+                space_chunk_size=space_chunk_size,
             )
 
             record = {
@@ -211,19 +230,20 @@ def evaluate_checkpoint(
             print("running final-step L2 error ...")
             t_final = float(t_window[-1])
 
-            t_eval = jnp.asarray([t_final])
+            t_eval = np.asarray([t_final])
             u_ref_final = u_ref_window[-1:, :]
             v_ref_final = v_ref_window[-1:, :]
             w_ref_final = w_ref_window[-1:, :]
 
-            u_error, v_error, w_error = model.compute_l2_error_time_chunked(
+            u_error, v_error, w_error = model.compute_l2_error_time_space_chunked(
                 model.state.params,
                 t_eval,
                 coords,
                 u_ref_final,
                 v_ref_final,
                 w_ref_final,
-                chunk_seconds=chunk_seconds,
+                time_chunk_size=1,
+                space_chunk_size=space_chunk_size,
             )
 
             record = {
@@ -316,7 +336,7 @@ def main():
         "--device",
         type=str,
         default="auto",
-        choices=["auto", "cpu", "gpu"],
+        choices=["auto", "gpu"],
         help="執行裝置",
     )
     parser.add_argument(

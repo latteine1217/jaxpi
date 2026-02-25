@@ -3,15 +3,11 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 from jax import lax, jit, grad, vmap, jacrev, hessian
-from jax.tree_util import tree_map
 
 import numpy as np
-import optax
 
-from jaxpi import archs
 from jaxpi.models import ForwardIVP
 from jaxpi.evaluator import BaseEvaluator
-from jaxpi.utils import ntk_fn
 
 
 class NavierStokes(ForwardIVP):
@@ -523,70 +519,48 @@ class NavierStokes(ForwardIVP):
             space_chunk_size,
         )
 
-    def compute_l2_error_time_chunked(
-        self,
-        params,
-        t,
-        coords,
-        u_ref,
-        v_ref,
-        w_ref,
-        chunk_seconds=1.0,
-    ):
-        t_values = np.asarray(t)
-        total_u = jnp.array(0.0)
-        total_v = jnp.array(0.0)
-        total_w = jnp.array(0.0)
-        denom_u = jnp.array(0.0)
-        denom_v = jnp.array(0.0)
-        denom_w = jnp.array(0.0)
-
-        start = 0
-        time_count = t_values.shape[0]
-        while start < time_count:
-            t0 = t_values[start]
-            end = start + 1
-            while end < time_count and (t_values[end] - t0) < chunk_seconds:
-                end += 1
-
-            t_chunk = t[start:end]
-            u_ref_chunk = u_ref[start:end, :]
-            v_ref_chunk = v_ref[start:end, :]
-            w_ref_chunk = w_ref[start:end, :]
-
-            u_pred = self.u_pred_fn(params, t_chunk, coords[:, 0], coords[:, 1])
-            v_pred = self.v_pred_fn(params, t_chunk, coords[:, 0], coords[:, 1])
-            w_pred = self.w_pred_fn(params, t_chunk, coords[:, 0], coords[:, 1])
-
-            total_u = total_u + jnp.sum((u_pred - u_ref_chunk) ** 2)
-            total_v = total_v + jnp.sum((v_pred - v_ref_chunk) ** 2)
-            total_w = total_w + jnp.sum((w_pred - w_ref_chunk) ** 2)
-            denom_u = denom_u + jnp.sum(u_ref_chunk**2)
-            denom_v = denom_v + jnp.sum(v_ref_chunk**2)
-            denom_w = denom_w + jnp.sum(w_ref_chunk**2)
-
-            start = end
-
-        u_error = jnp.sqrt(total_u) / jnp.sqrt(denom_u)
-        v_error = jnp.sqrt(total_v) / jnp.sqrt(denom_v)
-        w_error = jnp.sqrt(total_w) / jnp.sqrt(denom_w)
-        return u_error, v_error, w_error
-
-
 class NavierStokesEvaluator(BaseEvaluator):
     def __init__(self, config, model):
         super().__init__(config, model)
 
+    def _resolve_eval_chunk_sizes(self, t):
+        """
+        解析評估 chunk 大小，統一使用固定 time/space chunk 路徑。
+        """
+        time_chunk_size = getattr(self.config.logging, "eval_time_chunk_size", None)
+        if time_chunk_size is None:
+            chunk_seconds = float(getattr(self.config.logging, "eval_time_chunk_seconds", 1.0))
+            t_values = np.asarray(t)
+            if t_values.size > 1:
+                t_sorted = np.sort(t_values)
+                dt = float(t_sorted[1] - t_sorted[0])
+                if dt > 0:
+                    time_chunk_size = max(1, int(chunk_seconds / dt))
+                else:
+                    time_chunk_size = 1
+            else:
+                time_chunk_size = 1
+        time_chunk_size = int(time_chunk_size)
+        if time_chunk_size < 1:
+            time_chunk_size = 1
+
+        space_chunk_size = int(getattr(self.config.logging, "eval_space_chunk_size", 4096))
+        if space_chunk_size < 1:
+            space_chunk_size = 4096
+
+        return time_chunk_size, space_chunk_size
+
     def log_errors(self, params, t, coords, u_ref, v_ref, w_ref):
-        chunk_seconds = getattr(self.config.logging, "eval_time_chunk_seconds", 1.0)
-        u_error, v_error, w_error = self.model.compute_l2_error_time_chunked(
+        time_chunk_size, space_chunk_size = self._resolve_eval_chunk_sizes(t)
+        u_error, v_error, w_error = self.model.compute_l2_error_time_space_chunked(
             params,
             t,
             coords,
             u_ref,
             v_ref,
             w_ref,
-            chunk_seconds=chunk_seconds,
+            time_chunk_size=time_chunk_size,
+            space_chunk_size=space_chunk_size,
         )
         self.log_dict["u_error"] = u_error
         self.log_dict["v_error"] = v_error
