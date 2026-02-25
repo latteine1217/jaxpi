@@ -1,55 +1,40 @@
-# PirateNets: Physics-informed Deep Learning with Residual Adaptive Networks
+# JAXpi Kolmogorov Flow Branch
 
-This branch contains the  code for [paper](https://arxiv.org/abs/2402.00326): PirateNets: Physics-informed Deep Learning with Residual Adaptive Networks
+本分支聚焦於 Kolmogorov Flow 的 PINN 實驗，目標是用可重現流程比較 PIRATE 與 SOAP 設定。
 
-![PirateNets](./figures/piratenet.png)
-
-## Usage
-
-### Install
+## 快速開始
 
 ```bash
 uv venv
 uv pip install -e .
 ```
 
-### Run (example)
-
 ```bash
-uv run python examples/allen_cahn/train.py
+uv run python examples/kolmogorov_flow/main.py \
+  --config=examples/kolmogorov_flow/configs/pirate.py \
+  --workdir=./runs/kf_pirate
 ```
 
-For GPU/TPU, follow the official JAX installation guide for your platform and CUDA version.
+```bash
+python3 examples/kolmogorov_flow/evaluate_checkpoint.py \
+  --config pirate \
+  --checkpoint_path ./runs/kf_pirate/ckpt
+```
 
-## Benchmarks
+## 專案重點
 
-The following table shows the performance of PirateNets compared to JAX-PI on a set of benchmark problems. The accuracy is measured in 
-relative $L^2$ error between the predicted and true solutions.
+- `examples/kolmogorov_flow/`：訓練、評估、資料腳本
+- `jaxpi/`：模型與基礎工具
+- `slurm_*.sh`：伺服器提交腳本
 
-| **Benchmark** | PirateNet             | JAX-PI                |     
-|---------------|-----------------------|-----------------------|
-| Allen-Cahn    | $2.24 \times 10^{−5}$ | $5.37 \times 10^{−5}$ |
-| Korteweg–De Vries  | $4.27 \times 10^{−4}$ | $1.96 \times 10^{−3}$ |
-| Gray-Scott    | $3.61 \times 10^{−3}$ | $6.13$                |
-| Ginzburg-Landau | $1.49 \times 10^{−2}$ | $3.20 \times 10^{−2}$ |
-| Lid-driven cavity flow (Re=3200) | $4.21 \times 10^{−2}$ | $1.58 \times 10^{−1}$ |
+## 文檔入口
 
+- `INDEX.md`
+- `EXECUTIVE_SUMMARY.md`
+- `EVALUATION_GUIDE.md`
+- `server_setup_guide.md`
 
-### Grey-Scott
+## 備註
 
-![Grey-Scott](examples/grey_scott/figures/gs_animation.gif)
-
-### Ginzburg–Landau
-
-![Ginzburg–Landau](examples/ginzburg_landau/figures/gl_animation.gif)
-
-
-
-## Citation
-
-    @article{wang2024piratenets,
-      title={PirateNets: Physics-informed Deep Learning with Residual Adaptive Networks},
-      author={Wang, Sifan and Li, Bowen and Chen, Yuhan and Perdikaris, Paris},
-      journal={arXiv preprint arXiv:2402.00326},
-      year={2024}
-    }
+- 大型 DNS/LES/checkpoint 資料不應直接納入 Git。
+- 以 `README.md` + `INDEX.md` 為主要維護入口。
