@@ -21,3 +21,6 @@ logs/
 soap_Re10000_220260120/
 examples/kolmogorov_flow/data/kolmogorov_dns/
 examples/kolmogorov_flow/data/kolmogorov_les/
+
+# Thesis workspace
+thesis/

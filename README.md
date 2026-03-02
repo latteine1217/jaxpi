@@ -47,6 +47,7 @@ python3 examples/kolmogorov_flow/evaluate_checkpoint.py \
 - `examples/kolmogorov_flow/evaluate_checkpoint.py` 已整合模式切換，使用 `--mode`、`--device` 控制（`auto/gpu`）。
 - 訓練結束的 full-series 誤差評估改為固定 chunk 的 JAX 掃描路徑（降低 host-device 來回）。
 - 一次性分析腳本集中到 `scripts/analysis/`。
+- `thesis/` 視為本地論文工作區，已加入 `.gitignore`，不隨專案原始碼同步到 Git。
 
 ## 分析腳本（scripts/analysis）
 
