@@ -48,7 +48,9 @@ def get_config():
     config.windowed_data_dir = None
     config.sensor_json = None
     config.sensor_values = None
-    config.sensor_batch_size_per_device = None
+    config.use_vorticity_data_loss = False
+    # 將 data batch 與 PDE/residual batch 解耦，避免 dense LES 路徑把顯存一次撐滿。
+    config.sensor_batch_size_per_device = 512
     config.sensor_time_shift = True
 
     # Optim
@@ -62,13 +64,15 @@ def get_config():
     optim.decay_steps = 2000
     optim.staircase = False
     optim.warmup_steps = 2000
+    optim.grad_clip_norm = 1.0
     optim.grad_accum_steps = 0
     optim.schedule_free = False
 
     # Training
     config.training = training = ml_collections.ConfigDict()
     training.max_steps = 20000
-    training.batch_size_per_device = 4096
+    # RTX 3090 Turbo 24GB 上以較保守設定起跑，避免 dense LES + grad_norm + causal 在首個 step 就爆記憶體。
+    training.batch_size_per_device = 1024
     training.num_time_windows = 10
 
     # Weighting (PDE + IC + LES data constraint)
@@ -83,20 +87,23 @@ def get_config():
             "rc": 0.5,
             "u_data": 1.0,
             "v_data": 1.0,
-            "w_data": 1.0,
+            "w_data": 0.0,
         }
     )
     weighting.momentum = 0.9
+    # L4/24GB 等級 GPU 上，先完成一段 warmup 再做 grad-norm，避免 step 0 的 jacrev(losses) 峰值顯存。
+    weighting.start_step = 1000
     weighting.update_every_steps = 1000
 
-    weighting.use_causal = True
+    weighting.use_causal = False
     weighting.causal_tol = 1.0
-    weighting.num_chunks = 16
+    weighting.num_chunks = 1
 
     # Memory Optimization
     config.optimization = optimization = ml_collections.ConfigDict()
-    optimization.use_vmap_chunking = False
-    optimization.vmap_chunk_size = 512
+    # 訓練期預測改為空間分塊，降低 u/v/w 與渦度路徑的峰值顯存。
+    optimization.use_vmap_chunking = True
+    optimization.vmap_chunk_size = 256
     optimization.use_eval_checkpoint = False
 
     # Logging

@@ -160,6 +160,7 @@ def train_one_window(
     mesh = parallel_state["mesh"]
     data_sharding = parallel_state["data_sharding"]
     replicated_sharding = parallel_state["replicated_sharding"]
+    weighting_start_step = int(config.weighting.get("start_step", 0))
 
     def _split_and_put_batch(batch):
         """
@@ -241,7 +242,18 @@ def train_one_window(
 
     def _jit_step(state, batch):
         grads = jax.grad(model.loss)(state.params, state.weights, batch)
-        return state.apply_gradients(grads=grads)
+
+        def _leaf_is_finite(x):
+            return jnp.all(jnp.isfinite(x))
+
+        grads_finite = jax.tree_util.tree_reduce(
+            lambda acc, x: jnp.logical_and(acc, _leaf_is_finite(x)),
+            grads,
+            initializer=jnp.array(True),
+        )
+        safe_grads = tree_map(lambda g: jnp.where(jnp.isfinite(g), g, jnp.zeros_like(g)), grads)
+        next_state = state.apply_gradients(grads=safe_grads)
+        return jax.lax.cond(grads_finite, lambda _: next_state, lambda _: state, operand=None)
 
     if num_devices > 1:
         in_shardings = (
@@ -298,7 +310,11 @@ def train_one_window(
 
         # Update weights if necessary
         if config.weighting.scheme in ["grad_norm", "ntk"]:
-            if step % config.weighting.update_every_steps == 0:
+            should_update_weights = (
+                step >= weighting_start_step
+                and (step - weighting_start_step) % config.weighting.update_every_steps == 0
+            )
+            if should_update_weights:
                 if num_devices > 1 and jit_update_weights is not None:
                     with mesh_context:
                         model.state = jit_update_weights(model.state, batch)
@@ -335,6 +351,20 @@ def train_one_window(
 
                 # 僅傳輸標量結果到 host（<1 KB vs 數十 MB）
                 log_dict = jax.device_get(log_dict_device)
+
+                non_finite_metrics = {}
+                for key, value in log_dict.items():
+                    value_array = np.asarray(value)
+                    if np.issubdtype(value_array.dtype, np.number) and not np.all(
+                        np.isfinite(value_array)
+                    ):
+                        non_finite_metrics[key] = value_array.tolist()
+
+                if non_finite_metrics:
+                    raise FloatingPointError(
+                        "偵測到非有限訓練指標: "
+                        f"time_window={idx + 1}, step={step}, metrics={non_finite_metrics}"
+                    )
 
                 # 添加時間窗口資訊到 log
                 log_dict["time_window"] = idx + 1
@@ -924,7 +954,8 @@ def _validate_batch_size_config(config: ml_collections.ConfigDict, num_devices: 
             f"  - num_devices: {num_devices}\n"
             f"  - global_batch_size: {global_batch_size}\n"
             f"  - num_chunks: {num_chunks}\n"
-            f"  - chunk_size_per_device: {chunk_size_per_device}"
+            f"  - chunk_size_per_device: {chunk_size_per_device}\n"
+            f"  - weighting.start_step: {int(config.weighting.get('start_step', 0))}"
         )
 
         # 檢查 sensor batch size（如果有）

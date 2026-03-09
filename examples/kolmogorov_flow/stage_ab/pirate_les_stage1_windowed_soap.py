@@ -1,4 +1,4 @@
-"""Stage A: Dense LES data constraint with windowed loading."""
+"""Stage A: Dense LES data constraint with windowed loading (SOAP optimizer)."""
 
 import ml_collections
 
@@ -6,7 +6,7 @@ import jax.numpy as jnp
 
 
 def get_config():
-    """Stage A: LES dense constraint (windowed data)."""
+    """Stage A: LES dense constraint with windowed loading and SOAP optimizer."""
     config = ml_collections.ConfigDict()
 
     config.mode = "train"
@@ -16,10 +16,10 @@ def get_config():
     # Weights & Biases
     config.wandb = wandb = ml_collections.ConfigDict()
     wandb.project = "PINN-Kolmogorov_flow"
-    wandb.name = "pirate_les_stage1_windowed"
+    wandb.name = "pirate_les_stage1_windowed_soap"
     wandb.group = "les_then_sensor"
-    wandb.tags = ["les", "stage1", "dense", "windowed", "Re100000", "causal"]
-    wandb.notes = "Stage A: LES dense data constraint with windowed loading"
+    wandb.tags = ["les", "stage1", "soap", "dense", "windowed", "Re100000", "causal"]
+    wandb.notes = "Stage A: LES dense data constraint with windowed loading and SOAP optimizer"
     wandb.sweep_id = None
 
     # Arch
@@ -39,7 +39,7 @@ def get_config():
     arch.nonlinearity = 0.0
     arch.pi_init = None
 
-    # Data (LES dense constraint, windowed files)
+    # Data
     config.time_fraction = 1.0
     config.dataset_path = "examples/kolmogorov_flow/data/kolmogorov_les/kolmogorov_les_re100000.npy"
     config.dns_time_range = None
@@ -51,13 +51,12 @@ def get_config():
     config.sensor_json = None
     config.sensor_values = None
     config.use_vorticity_data_loss = False
-    # 將 data batch 與 PDE/residual batch 解耦，避免 dense LES 路徑把顯存一次撐滿。
     config.sensor_batch_size_per_device = 512
     config.sensor_time_shift = True
 
     # Optim
     config.optim = optim = ml_collections.ConfigDict()
-    optim.optimizer = "Adam"
+    optim.optimizer = "Soap"
     optim.beta1 = 0.9
     optim.beta2 = 0.999
     optim.eps = 1e-8
@@ -66,18 +65,16 @@ def get_config():
     optim.decay_steps = 2000
     optim.staircase = False
     optim.warmup_steps = 2000
-    optim.grad_clip_norm = 1.0
     optim.grad_accum_steps = 0
     optim.schedule_free = False
 
     # Training
     config.training = training = ml_collections.ConfigDict()
     training.max_steps = 20000
-    # RTX 3090 Turbo 24GB 上以較保守設定起跑，避免 dense LES + grad_norm + causal 在首個 step 就爆記憶體。
     training.batch_size_per_device = 1024
     training.num_time_windows = 10
 
-    # Weighting (PDE + IC + LES data constraint)
+    # Weighting
     config.weighting = weighting = ml_collections.ConfigDict()
     weighting.scheme = "grad_norm"
     weighting.init_weights = ml_collections.ConfigDict(
@@ -93,7 +90,6 @@ def get_config():
         }
     )
     weighting.momentum = 0.9
-    # L4/24GB 等級 GPU 上，先完成一段 warmup 再做 grad-norm，避免 step 0 的 jacrev(losses) 峰值顯存。
     weighting.start_step = 1000
     weighting.update_every_steps = 1000
 
@@ -103,7 +99,6 @@ def get_config():
 
     # Memory Optimization
     config.optimization = optimization = ml_collections.ConfigDict()
-    # 訓練期預測改為空間分塊，降低 u/v/w 與渦度路徑的峰值顯存。
     optimization.use_vmap_chunking = True
     optimization.vmap_chunk_size = 256
     optimization.use_eval_checkpoint = False
@@ -168,5 +163,8 @@ def _validate_config(config):
                 "This may affect network performance."
             )
 
-    print(f"✓ Configuration validated: batch_size_per_device={batch_size_per_device}, num_chunks={num_chunks}")
+    print(
+        f"✓ Configuration validated: batch_size_per_device={batch_size_per_device}, "
+        f"num_chunks={num_chunks}"
+    )
     print(f"  Each chunk will contain {batch_size_per_device // num_chunks} samples per device")

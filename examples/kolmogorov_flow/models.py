@@ -194,16 +194,17 @@ class NavierStokes(ForwardIVP):
         return p
 
     def w_net(self, params, t, x, y):
-        def _u_y(t_scalar, x_scalar, y_scalar):
-            return grad(self.u_net, argnums=3)(params, t_scalar, x_scalar, y_scalar)
-
-        def _v_x(t_scalar, x_scalar, y_scalar):
-            return grad(self.v_net, argnums=2)(params, t_scalar, x_scalar, y_scalar)
-
-        u_y = vmap(_u_y)(t, x, y)
-        v_x = vmap(_v_x)(t, x, y)
-        w = v_x - u_y
-        return w
+        """
+        What:
+            計算單一時空點的渦度 w = dv/dx - du/dy。
+        Why:
+            `w_net` 必須維持和 `u_net` / `v_net` 相同的單點函數介面，
+            讓外層 `vmap` 統一負責 batch 向量化；若在此再次 `vmap`，
+            會在外層已傳入 scalar 時觸發 shape 錯誤。
+        """
+        u_y = grad(self.u_net, argnums=3)(params, t, x, y)
+        v_x = grad(self.v_net, argnums=2)(params, t, x, y)
+        return v_x - u_y
 
     def r_net(self, params, t, x, y):
         u, v, p = self.neural_net(params, t, x, y)
@@ -298,10 +299,10 @@ class NavierStokes(ForwardIVP):
             rv_loss = jnp.mean(rv_l)
             rc_loss = jnp.mean(rc_l)
         else:
-            # For rare cases where weighting_scheme is not grad_norm
-            # and res_and_w is not used
-            ru_pred, rv_pred, rc_pred = self.res_fn(
-                params, res_batch[..., 0], res_batch[..., 1], res_batch[..., 2]
+            # 非 causal 路徑直接對殘差 batch 做逐點 residual 計算。
+            res_batch = jnp.reshape(res_batch, (-1, res_batch.shape[-1]))
+            ru_pred, rv_pred, rc_pred = self.r_pred_fn(
+                params, res_batch[:, 0], res_batch[:, 1], res_batch[:, 2]
             )
 
             ru_loss = jnp.mean(ru_pred**2)
@@ -317,11 +318,16 @@ class NavierStokes(ForwardIVP):
             t_data, coords_data, u_data, v_data, w_data = data_batch
             u_pred = self.u_data_pred_fn(params, t_data, coords_data[..., 0], coords_data[..., 1])
             v_pred = self.v_data_pred_fn(params, t_data, coords_data[..., 0], coords_data[..., 1])
-            w_pred = self.w_data_pred_fn(params, t_data, coords_data[..., 0], coords_data[..., 1])
 
             u_data_loss = jnp.mean((u_pred - u_data) ** 2)
             v_data_loss = jnp.mean((v_pred - v_data) ** 2)
-            w_data_loss = jnp.mean((w_pred - w_data) ** 2)
+            if self.config.get("use_vorticity_data_loss", True):
+                w_pred = self.w_data_pred_fn(
+                    params, t_data, coords_data[..., 0], coords_data[..., 1]
+                )
+                w_data_loss = jnp.mean((w_pred - w_data) ** 2)
+            else:
+                w_data_loss = jnp.array(0.0)
 
         loss_dict = {
             "u_ic": u_ic_loss,

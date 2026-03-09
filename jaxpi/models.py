@@ -42,9 +42,11 @@ class TrainState(train_state.TrainState):
           and additional attributes replaced as specified by `kwargs`.
         """
 
-        running_average = (
-            lambda old_w, new_w: old_w * self.momentum + (1 - self.momentum) * new_w
-        )
+        def running_average(old_w, new_w):
+            candidate = old_w * self.momentum + (1 - self.momentum) * new_w
+            # 非有限值代表 adaptive weighting 已失穩，保留舊權重避免整個 state 被污染。
+            return jnp.where(jnp.isfinite(candidate), candidate, old_w)
+
         weights = tree_map(running_average, self.weights, weights)
         weights = lax.stop_gradient(weights)
 
@@ -149,6 +151,10 @@ def _create_optimizer(config):
             optax.clip_by_global_norm(1.0),
             optax.contrib.schedule_free(tx, lr, b1=config.beta1)
             )
+
+    grad_clip_norm = getattr(config, "grad_clip_norm", None)
+    if grad_clip_norm is not None and float(grad_clip_norm) > 0:
+        tx = optax.chain(optax.clip_by_global_norm(float(grad_clip_norm)), tx)
 
     # Gradient accumulation
     if config.grad_accum_steps > 1:
