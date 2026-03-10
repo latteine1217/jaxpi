@@ -26,12 +26,30 @@ python3 examples/kolmogorov_flow/evaluate_checkpoint.py \
   --mode final_step
 ```
 
+```bash
+python3 examples/kolmogorov_flow/evaluate_checkpoint.py \
+  --config stage1 \
+  --checkpoint_path ./pirate_les_stage1/ckpt \
+  --mode final_step \
+  --device gpu
+```
+
+```bash
+python3 examples/kolmogorov_flow/evaluate_checkpoint.py \
+  --config stage1 \
+  --checkpoint_path ./pirate_les_stage1/ckpt \
+  --mode window \
+  --device gpu
+```
+
 ## 驗證重點
 
 - 同一物理時間點再做模型比較。
 - 同時檢查 `u/v/w` 三個誤差，不只看單一指標。
 - 記錄 checkpoint step、窗口範圍、資料來源。
 - `--device` 僅支援 `auto` 或 `gpu`。
+- `--config` 也支援 `stage_ab` alias：
+  `stage1`、`stage1_windowed`、`stage1_soap`、`stage1_windowed_soap`、`stage2`、`stage2_soap`
 
 ## 訓練期誤差記錄（`log_errors=True`）
 

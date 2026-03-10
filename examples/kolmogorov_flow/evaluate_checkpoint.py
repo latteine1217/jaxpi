@@ -11,6 +11,7 @@
 """
 
 import argparse
+import importlib.util
 import os
 import sys
 from typing import Optional
@@ -63,15 +64,51 @@ def resolve_eval_chunk_sizes(logging_config, t_values: np.ndarray) -> tuple[int,
 
 
 def load_config(config_name: str):
-    """依配置名稱載入實驗 config。"""
-    if config_name == "soap":
-        from configs import soap as config_module
-    elif config_name == "pirate":
-        from configs import pirate as config_module
-    else:
-        raise ValueError(f"Unknown config: {config_name}")
+    """依配置名稱或檔案路徑載入實驗 config。"""
+    config_aliases = {
+        "soap": os.path.join(THIS_DIR, "configs", "soap.py"),
+        "pirate": os.path.join(THIS_DIR, "configs", "pirate.py"),
+        "stage1": os.path.join(THIS_DIR, "stage_ab", "pirate_les_stage1.py"),
+        "stage1_windowed": os.path.join(THIS_DIR, "stage_ab", "pirate_les_stage1_windowed.py"),
+        "stage1_soap": os.path.join(THIS_DIR, "stage_ab", "pirate_les_stage1_soap.py"),
+        "stage1_windowed_soap": os.path.join(
+            THIS_DIR, "stage_ab", "pirate_les_stage1_windowed_soap.py"
+        ),
+        "stage2": os.path.join(THIS_DIR, "stage_ab", "pirate_les_stage2.py"),
+        "stage2_soap": os.path.join(THIS_DIR, "stage_ab", "pirate_les_stage2_soap.py"),
+    }
 
+    config_path = config_aliases.get(config_name, config_name)
+    if not config_path.endswith(".py"):
+        raise ValueError(f"Unknown config: {config_name}")
+    if not os.path.isabs(config_path):
+        config_path = os.path.abspath(config_path)
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(f"找不到 config 檔案: {config_path}")
+
+    module_name = f"eval_config_{os.path.splitext(os.path.basename(config_path))[0]}"
+    spec = importlib.util.spec_from_file_location(module_name, config_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"無法載入 config: {config_path}")
+
+    config_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(config_module)
     return config_module.get_config()
+
+
+def resolve_checkpoint_root(checkpoint_path: str) -> str:
+    """允許傳入實驗根目錄或 ckpt 根目錄，統一轉為 ckpt 根目錄。"""
+    expanded = os.path.abspath(os.path.expanduser(checkpoint_path))
+    if os.path.isdir(expanded):
+        if any(name.startswith("time_window_") for name in os.listdir(expanded)):
+            return expanded
+        ckpt_dir = os.path.join(expanded, "ckpt")
+        if os.path.isdir(ckpt_dir):
+            return ckpt_dir
+    raise FileNotFoundError(
+        f"找不到 checkpoint 根目錄: {checkpoint_path}。預期為 time_window_* 所在目錄，"
+        "或其上一層實驗目錄。"
+    )
 
 
 def discover_windows(checkpoint_path: str, requested_window: Optional[int]) -> list[int]:
@@ -127,9 +164,15 @@ def evaluate_checkpoint(
     from examples.kolmogorov_flow import models
 
     config = load_config(config_name)
+    checkpoint_root = resolve_checkpoint_root(checkpoint_path)
 
     print("=== Data Loading ===")
-    u_ref, v_ref, w_ref, t_star, coords, nu = get_dataset(time_fraction=config.time_fraction)
+    u_ref, v_ref, w_ref, t_star, coords, nu = get_dataset(
+        time_fraction=config.time_fraction,
+        dataset_path=config.dataset_path,
+        time_range=config.get("dns_time_range"),
+        time_stride=config.get("dns_time_stride", 1),
+    )
     print(f"time steps: {len(t_star)} (t in [{float(t_star[0]):.4f}, {float(t_star[-1]):.4f}])")
     print(
         f"space points: {coords.shape[0]} ({int(np.sqrt(coords.shape[0]))}x{int(np.sqrt(coords.shape[0]))})"
@@ -141,7 +184,7 @@ def evaluate_checkpoint(
     print()
 
     num_time_steps = len(t_star) // config.training.num_time_windows
-    time_windows = discover_windows(checkpoint_path, time_window_idx)
+    time_windows = discover_windows(checkpoint_root, time_window_idx)
 
     if not time_windows:
         raise RuntimeError("找不到可評估的時間窗口，請檢查 checkpoint_path。")
@@ -150,6 +193,7 @@ def evaluate_checkpoint(
     print(f"config: {config_name}")
     print(f"mode: {mode}")
     print(f"device: {device}")
+    print(f"checkpoint_root: {checkpoint_root}")
     print(f"windows: {time_windows}")
     print()
 
@@ -182,7 +226,7 @@ def evaluate_checkpoint(
         model_t = t_window
         model = models.NavierStokes(config, model_t, coords, u0, v0, w0, nu)
 
-        ckpt_dir = os.path.join(checkpoint_path, f"time_window_{window_idx}")
+        ckpt_dir = os.path.join(checkpoint_root, f"time_window_{window_idx}")
         max_step = get_latest_checkpoint_step(ckpt_dir)
 
         if max_step is None:
@@ -316,8 +360,7 @@ def main():
         "--config",
         type=str,
         required=True,
-        choices=["soap", "pirate"],
-        help="配置名稱",
+        help="配置名稱或 config 檔案路徑",
     )
     parser.add_argument(
         "--checkpoint_path",
