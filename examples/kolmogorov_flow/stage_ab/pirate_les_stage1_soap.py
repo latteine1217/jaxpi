@@ -10,7 +10,7 @@ def get_config():
     config = ml_collections.ConfigDict()
 
     config.mode = "train"
-    config.transfer_learning = True
+    config.transfer_learning = False
     config.transfer_optimizer_state = False
 
     # Weights & Biases
