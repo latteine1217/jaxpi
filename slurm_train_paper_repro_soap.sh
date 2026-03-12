@@ -29,6 +29,8 @@ EVAL_DEVICE="${EVAL_DEVICE:-gpu}"
 mkdir -p "${PROJECT_DIR}/logs" "${PROJECT_DIR}/runs"
 cd "${PROJECT_DIR}"
 
+export PATH="${HOME}/.local/bin:${PATH}"
+
 if ! command -v uv >/dev/null 2>&1; then
   echo "uv not found" >&2
   exit 1
