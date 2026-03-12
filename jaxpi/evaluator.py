@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 
-from jax import jacrev
+from jax import grad
 from jax.tree_util import tree_map
 
 from jaxpi.utils import flatten_pytree
@@ -24,9 +24,13 @@ class BaseEvaluator:
             self.log_dict[key + "_weight"] = values
 
     def log_grads(self, params, batch, *args):
-        grads = jacrev(self.model.losses)(params, batch, *args)
-        for key, value in grads.items():
-            flattened_grad = flatten_pytree(value)
+        loss_dict = self.model.losses(params, batch, *args)
+        loss_keys = tuple(loss_dict.keys())
+
+        for key in loss_keys:
+            loss_fn = lambda p, key=key: self.model.losses(p, batch, *args)[key]
+            g = grad(loss_fn)(params)
+            flattened_grad = flatten_pytree(g)
             grad_norm = jnp.linalg.norm(flattened_grad)
             self.log_dict[key + "_grad_norm"] = grad_norm
 

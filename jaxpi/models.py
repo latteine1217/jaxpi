@@ -109,11 +109,6 @@ def _create_optimizer(config):
         tx = soap(
             learning_rate=lr, b1=config.beta1, b2=config.beta2, weight_decay=0.0, precondition_frequency=2
             )
-        # 論文要求：SOAP + gradient clipping (global norm = 1.0)
-        tx = optax.chain(
-            optax.clip_by_global_norm(1.0),
-            tx
-        )
 
 
     elif config.optimizer == "Kron":
@@ -145,12 +140,8 @@ def _create_optimizer(config):
             learning_rate=lr
         )
 
-    # SOAP 本身就是 schedule-free optimizer，不需要額外 wrapper
-    if config.schedule_free and config.optimizer != "Soap":
-        tx = optax.chain(
-            optax.clip_by_global_norm(1.0),
-            optax.contrib.schedule_free(tx, lr, b1=config.beta1)
-            )
+    if config.schedule_free:
+        tx = optax.contrib.schedule_free(tx, lr, b1=config.beta1)
 
     grad_clip_norm = getattr(config, "grad_clip_norm", None)
     if grad_clip_norm is not None and float(grad_clip_norm) > 0:
@@ -277,13 +268,16 @@ class PINN:
     @partial(jit, static_argnums=(0,))
     def compute_weights(self, params, batch, *args):
         if self.config.weighting.scheme == "grad_norm":
-            # Compute the gradient of each loss w.r.t. the parameters
-            grads = jacrev(self.losses)(params, batch, *args)
+            # Compute the grad norm of each loss w.r.t. the parameters serially
+            # to avoid materializing the full Jacobian of all losses at once.
+            loss_dict = self.losses(params, batch, *args)
+            loss_keys = tuple(loss_dict.keys())
 
-            # Compute the grad norm of each loss
             grad_norm_dict = {}
-            for key, value in grads.items():
-                flattened_grad = flatten_pytree(value)
+            for key in loss_keys:
+                loss_fn = lambda p, key=key: self.losses(p, batch, *args)[key]
+                g = grad(loss_fn)(params)
+                flattened_grad = flatten_pytree(g)
                 grad_norm_dict[key] = jnp.linalg.norm(flattened_grad)
 
             # Compute the mean of grad norms over all losses
