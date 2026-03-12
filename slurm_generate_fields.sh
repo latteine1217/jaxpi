@@ -1,136 +1,75 @@
 #!/bin/bash
-#SBATCH --job-name=field_viz
-#SBATCH --output=/home/junyi/jaxpi/logs/field_viz_%j.out
-#SBATCH --error=/home/junyi/jaxpi/logs/field_viz_%j.err
-#SBATCH --time=4:00:00
+#SBATCH --job-name=kf_field_snapshots
+#SBATCH --output=logs/kf_field_snapshots_%j.out
+#SBATCH --error=logs/kf_field_snapshots_%j.err
+#SBATCH --time=04:00:00
 #SBATCH --partition=r740
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=50G
 
-# ===========================
-# 流場視覺化腳本（統一版本）
-# ===========================
-# 功能：生成 DNS vs PINN 流場對比圖
-# 支援：PIRATE 和 SOAP 模型
-# 配置：通過環境變數調整行為
-# ===========================
+set -euo pipefail
 
-PROJECT_DIR="${HOME}/jaxpi"
-OUTPUT_DIR="${OUTPUT_DIR:-${HOME}/jaxpi/field_comparison_plots}"
-PYTHON_SCRIPT="${PYTHON_SCRIPT:-generate_field_comparison.py}"
+# Kolmogorov 場快照對比生成腳本
+# 預設比較 Stage A Adam vs Stage A SOAP。維護原則：只在本地 repo 修改，遠端同步後使用。
 
-# 配置要生成的窗口（可通過環境變數覆蓋）
-SOAP_WINDOWS="${SOAP_WINDOWS:-1 10 17 25}"
-PIRATE_WINDOWS="${PIRATE_WINDOWS:-1 4 7 10}"
+PROJECT_DIR="${PROJECT_DIR:-${HOME}/jaxpi}"
+OUTPUT_DIR="${OUTPUT_DIR:-${PROJECT_DIR}/examples/kolmogorov_flow/comparison}"
+PIRATE_CONFIG_ALIAS="${PIRATE_CONFIG_ALIAS:-stage1}"
+SOAP_CONFIG_ALIAS="${SOAP_CONFIG_ALIAS:-stage1_soap}"
+PIRATE_CHECKPOINT_PATH="${PIRATE_CHECKPOINT_PATH:-${PROJECT_DIR}/runs/kf_stage1/ckpt}"
+SOAP_CHECKPOINT_PATH="${SOAP_CHECKPOINT_PATH:-${PROJECT_DIR}/runs/kf_stage1_soap/ckpt}"
+SNAPSHOT_TIMES="${SNAPSHOT_TIMES:-0.5 1.0 1.5 1.8}"
 
-# 模型配置
-RUN_SOAP="${RUN_SOAP:-1}"
-RUN_PIRATE="${RUN_PIRATE:-1}"
+cd "${PROJECT_DIR}"
+mkdir -p "${PROJECT_DIR}/logs" "${OUTPUT_DIR}"
 
-echo "=========================================="
-echo "流場視覺化生成任務"
-echo "=========================================="
-echo "Job ID: $SLURM_JOB_ID"
-echo "Node: $SLURM_NODELIST"
-echo "Start Time: $(date)"
-echo ""
-echo "配置："
-echo "  - Python 腳本: ${PYTHON_SCRIPT}"
-echo "  - 輸出目錄: ${OUTPUT_DIR}"
-echo "  - SOAP 窗口: ${SOAP_WINDOWS}"
-echo "  - PIRATE 窗口: ${PIRATE_WINDOWS}"
-echo "=========================================="
-echo ""
+if ! command -v uv >/dev/null 2>&1; then
+  echo "uv not found" >&2
+  exit 1
+fi
 
-# 環境設置
-cd ${PROJECT_DIR}
+if [ ! -d "${PIRATE_CHECKPOINT_PATH}" ]; then
+  echo "PIRATE checkpoint path not found: ${PIRATE_CHECKPOINT_PATH}" >&2
+  exit 1
+fi
 
-# JAX 強制使用 CPU（Python 腳本內已設定，這裡再次確保）
-export JAX_PLATFORMS=cpu
+if [ ! -d "${SOAP_CHECKPOINT_PATH}" ]; then
+  echo "SOAP checkpoint path not found: ${SOAP_CHECKPOINT_PATH}" >&2
+  exit 1
+fi
+
+export UV_PROJECT_ENVIRONMENT="${PROJECT_DIR}/.venv"
+export PYTHONPATH="${PROJECT_DIR}:${PYTHONPATH:-}"
+export JAX_PLATFORMS="cpu"
 export CUDA_VISIBLE_DEVICES=""
-export XLA_PYTHON_CLIENT_PREALLOCATE=false
-export XLA_PYTHON_CLIENT_ALLOCATOR=platform
+export XLA_PYTHON_CLIENT_PREALLOCATE="false"
+export XLA_PYTHON_CLIENT_ALLOCATOR="platform"
 
-# 創建輸出目錄
-mkdir -p ${OUTPUT_DIR}
+cat <<EOF
+===========================
+Kolmogorov 場快照對比生成
+===========================
+Job ID: ${SLURM_JOB_ID}
+Project: ${PROJECT_DIR}
+Output: ${OUTPUT_DIR}
+Pirate config: ${PIRATE_CONFIG_ALIAS}
+Soap config: ${SOAP_CONFIG_ALIAS}
+Pirate ckpt: ${PIRATE_CHECKPOINT_PATH}
+Soap ckpt: ${SOAP_CHECKPOINT_PATH}
+Snapshot times: ${SNAPSHOT_TIMES}
+===========================
+EOF
 
-echo "環境檢查:"
-uv --version || echo "警告: uv 未找到"
-echo ""
+# shellcheck disable=SC2086
+uv run python examples/kolmogorov_flow/generate_field_snapshots.py \
+  --config_pirate "${PIRATE_CONFIG_ALIAS}" \
+  --config_soap "${SOAP_CONFIG_ALIAS}" \
+  --checkpoint_path_pirate "${PIRATE_CHECKPOINT_PATH}" \
+  --checkpoint_path_soap "${SOAP_CHECKPOINT_PATH}" \
+  --output_dir "${OUTPUT_DIR}" \
+  --times ${SNAPSHOT_TIMES}
 
-# ===========================
-# 生成 SOAP 流場對比圖
-# ===========================
-if [ "${RUN_SOAP}" = "1" ]; then
-    echo "=========================================="
-    echo "生成 SOAP 流場對比圖"
-    echo "=========================================="
-    echo ""
-
-    for window in ${SOAP_WINDOWS}; do
-        echo "--- SOAP Window ${window} ---"
-        uv run python ${PYTHON_SCRIPT} \
-            --config soap \
-            --checkpoint_path ~/jaxpi/soap_Re10000/ckpt \
-            --window ${window} \
-            --time_step -1 \
-            --output_dir ${OUTPUT_DIR}
-
-        if [ $? -ne 0 ]; then
-            echo "警告: SOAP Window ${window} 生成失敗"
-        fi
-        echo ""
-    done
-fi
-
-# ===========================
-# 生成 PIRATE 流場對比圖
-# ===========================
-if [ "${RUN_PIRATE}" = "1" ]; then
-    echo "=========================================="
-    echo "生成 PIRATE 流場對比圖"
-    echo "=========================================="
-    echo ""
-
-    for window in ${PIRATE_WINDOWS}; do
-        echo "--- PIRATE Window ${window} ---"
-        uv run python ${PYTHON_SCRIPT} \
-            --config pirate \
-            --checkpoint_path ~/jaxpi/pirate/ckpt \
-            --window ${window} \
-            --time_step -1 \
-            --output_dir ${OUTPUT_DIR}
-
-        if [ $? -ne 0 ]; then
-            echo "警告: PIRATE Window ${window} 生成失敗"
-        fi
-        echo ""
-    done
-fi
-
-EXIT_CODE=$?
-
-echo "=========================================="
-echo "生成完成"
-echo "=========================================="
-echo "End Time: $(date)"
-echo "Exit Code: ${EXIT_CODE}"
-echo ""
-
-if [ ${EXIT_CODE} -eq 0 ]; then
-    echo "✓ 流場對比圖生成成功"
-    echo ""
-    echo "結果位置: ${OUTPUT_DIR}/"
-    echo ""
-    echo "生成的圖片:"
-    ls -lh ${OUTPUT_DIR}/*.png 2>/dev/null || echo "沒有找到 PNG 檔案"
-else
-    echo "✗ 生成失敗 (Exit Code: ${EXIT_CODE})"
-    echo "請檢查錯誤日誌"
-fi
-
-echo ""
-echo "磁碟使用:"
-du -sh ${OUTPUT_DIR} 2>/dev/null || echo "輸出目錄不存在"
+echo "Generated outputs under: ${OUTPUT_DIR}"
+ls -lh "${OUTPUT_DIR}" | sed -n '1,120p'
