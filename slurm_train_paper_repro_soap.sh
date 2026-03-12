@@ -29,10 +29,10 @@ EVAL_DEVICE="${EVAL_DEVICE:-gpu}"
 mkdir -p "${PROJECT_DIR}/logs" "${PROJECT_DIR}/runs"
 cd "${PROJECT_DIR}"
 
-export PATH="${HOME}/.local/bin:${PATH}"
+PYTHON_BIN="${PYTHON_BIN:-${PROJECT_DIR}/.venv/bin/python}"
 
-if ! command -v uv >/dev/null 2>&1; then
-  echo "uv not found" >&2
+if [ ! -x "${PYTHON_BIN}" ]; then
+  echo "Python not found or not executable: ${PYTHON_BIN}" >&2
   exit 1
 fi
 
@@ -41,13 +41,12 @@ if [ ! -f "${CONFIG_PATH}" ]; then
   exit 1
 fi
 
-export UV_PROJECT_ENVIRONMENT="${PROJECT_DIR}/.venv"
 export PYTHONPATH="${PROJECT_DIR}:${PYTHONPATH:-}"
 export WANDB_MODE
 export XLA_PYTHON_CLIENT_MEM_FRACTION="${XLA_PYTHON_CLIENT_MEM_FRACTION:-0.95}"
 export TF_GPU_ALLOCATOR="${TF_GPU_ALLOCATOR:-cuda_malloc_async}"
 
-PY_VER=$(uv run python -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')")
+PY_VER=$(${PYTHON_BIN} -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')")
 SITE_PACKAGES="${PROJECT_DIR}/.venv/lib/${PY_VER}/site-packages"
 export LD_LIBRARY_PATH="${SITE_PACKAGES}/nvidia/cudnn/lib:${SITE_PACKAGES}/nvidia/cublas/lib:${SITE_PACKAGES}/nvidia/cuda_runtime/lib:${SITE_PACKAGES}/nvidia/cuda_cupti/lib:${SITE_PACKAGES}/nvidia/cufft/lib:${SITE_PACKAGES}/nvidia/cusolver/lib:${SITE_PACKAGES}/nvidia/cusparse/lib:${LD_LIBRARY_PATH:-}"
 
@@ -65,14 +64,14 @@ Extra args: ${EXTRA_ARGS}
 ===========================
 EOF
 
-uv --version
-uv run python -c "import jax; print('JAX', jax.__version__); print('devices:', jax.devices())"
+${PYTHON_BIN} -V
+${PYTHON_BIN} -c "import jax; print('JAX', jax.__version__); print('devices:', jax.devices())"
 nvidia-smi --query-gpu=index,name,memory.total,memory.used --format=csv
 
 START_TIME=$(date +%s)
 
 # shellcheck disable=SC2086
-srun uv run python examples/kolmogorov_flow/main.py \
+srun ${PYTHON_BIN} examples/kolmogorov_flow/main.py \
   --config="${CONFIG_PATH}" \
   --workdir="${WORKDIR}" \
   ${EXTRA_ARGS}
@@ -86,7 +85,7 @@ echo "Elapsed: ${ELAPSED}s"
 
 if [ "${RUN_EVAL}" = "1" ] && [ ${TRAIN_EXIT_CODE} -eq 0 ]; then
   echo "Running evaluation..."
-  uv run python examples/kolmogorov_flow/evaluate_checkpoint.py \
+  ${PYTHON_BIN} examples/kolmogorov_flow/evaluate_checkpoint.py \
     --config "${EVAL_CONFIG_ALIAS}" \
     --checkpoint_path "${WORKDIR}" \
     --mode "${EVAL_MODE}" \
