@@ -55,7 +55,7 @@ def get_config():
 
     # Data: pure PINN reproduction, so all data constraints remain disabled.
     config.time_fraction = 1.0
-    config.dataset_path = "examples/kolmogorov_flow/data/kolmogorov_dns/kolmogorov_dns_10000.npy"
+    config.dataset_path = "examples/kolmogorov_flow/data/kolmogorov_flow_Re10000_256.npy"
     config.dns_time_range = None
     config.dns_time_stride = 1
     config.sensor_json = None
