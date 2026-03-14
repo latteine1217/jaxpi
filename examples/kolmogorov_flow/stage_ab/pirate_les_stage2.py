@@ -104,7 +104,7 @@ def get_config():
     # Logging
     config.logging = logging = ml_collections.ConfigDict()
     logging.log_every_steps = 100
-    logging.log_errors = False
+    logging.log_errors = False  # 僅在需要正式 reference error 評估時開啟，平時訓練關閉以避免額外計算成本
     logging.log_losses = True
     logging.log_weights = True
     logging.log_lr = False

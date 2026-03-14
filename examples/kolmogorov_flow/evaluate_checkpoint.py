@@ -30,7 +30,8 @@ if THIS_DIR not in sys.path:
 def configure_device(device: str) -> None:
     """在匯入 JAX 相關模組前設定執行裝置。"""
     if device == "gpu":
-        os.environ["JAX_PLATFORMS"] = "gpu"
+        # 在 NVIDIA/CUDA 環境中顯式指定 cuda，避免 JAX 嘗試 rocm backend。
+        os.environ["JAX_PLATFORMS"] = "cuda"
     elif device == "auto":
         # 保持 JAX 預設策略
         pass

@@ -12,7 +12,7 @@ def get_dataset(
 ):
     from jaxpi.dataio.loaders import load_kolmogorov_dns
 
-    u_ref, v_ref, w_ref, omega_ref, t, coords, config = load_kolmogorov_dns(
+    u_ref, v_ref, _w_unused, omega_ref, t, coords, config = load_kolmogorov_dns(
         dataset_path,
         time_range=time_range,
         time_stride=time_stride,
@@ -20,9 +20,10 @@ def get_dataset(
     )
     nu = float(config.get("nu", 1.0 / Re))
 
-    # 優化：立即刪除不需要的 omega_ref，節省記憶體
-    # 對於 256×256×1000 的資料集，這可以節省 ~256 MB
-    del omega_ref
+    # 2D Kolmogorov flow 的第三個回傳值 `w` 不是渦度；此處應該對齊 omega_ref。
+    # 為了維持既有呼叫介面，仍沿用變數名 `w_ref`，但其內容實際上是 vorticity reference。
+    w_ref = omega_ref
+    del _w_unused, omega_ref
 
     if time_fraction < 1.0:
         num_steps = int(time_fraction * t.shape[0])
@@ -48,7 +49,7 @@ def get_dataset(
         u_ref.shape,
         "v_ref.shape",
         v_ref.shape,
-        "w_ref.shape",
+        "omega_ref.shape",
         w_ref.shape,
     )
 

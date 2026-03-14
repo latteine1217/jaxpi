@@ -32,52 +32,37 @@ def compute_enstrophy(w):
     return 0.5 * float(jnp.mean(w**2))
 
 
-def compute_energy_spectrum_2d(field, nx, ny):
-    """
-    计算2D能量谱
-    
-    Args:
-        field: 2D场 (nx, ny)
-        nx, ny: 网格尺寸
-    
-    Returns:
-        k: 波数
-        E_k: 能量谱
-    """
-    # 2D FFT
-    field_fft = np.fft.fft2(field)
-    field_fft = np.fft.fftshift(field_fft)
-    
-    # 计算能量密度
-    energy_density = np.abs(field_fft)**2
-    
-    # 创建波数网格 (使用实际物理波数)
-    kx = np.fft.fftshift(np.fft.fftfreq(nx, d=2*np.pi/nx))
-    ky = np.fft.fftshift(np.fft.fftfreq(ny, d=2*np.pi/ny))
+def compute_velocity_energy_spectrum_2d(u_field, v_field, nx, ny):
+    """计算二维速度场的 kinetic energy spectrum。"""
+    u_fft = np.fft.fft2(u_field)
+    v_fft = np.fft.fft2(v_field)
+    u_fft = np.fft.fftshift(u_fft)
+    v_fft = np.fft.fftshift(v_fft)
+
+    energy_density = 0.5 * (np.abs(u_fft) ** 2 + np.abs(v_fft) ** 2)
+
+    kx = np.fft.fftshift(np.fft.fftfreq(nx, d=2 * np.pi / nx))
+    ky = np.fft.fftshift(np.fft.fftfreq(ny, d=2 * np.pi / ny))
     KX, KY = np.meshgrid(kx, ky, indexing='ij')
     K = np.sqrt(KX**2 + KY**2)
-    
-    # 将能量按波数分箱
+
     k_max = np.max(K)
-    k_bins = np.linspace(1, k_max, min(50, int(k_max)))  # 最多50个bins
+    k_bins = np.linspace(1, k_max, min(50, int(k_max)))
     E_k = []
     k_out = []
-    
+
     for i in range(len(k_bins) - 1):
-        mask = (K >= k_bins[i]) & (K < k_bins[i+1])
-        n_points = np.sum(mask)
-        if n_points > 0:
-            # 能量谱：每个shell的总能量
+        mask = (K >= k_bins[i]) & (K < k_bins[i + 1])
+        if np.any(mask):
             E_k.append(np.sum(energy_density[mask]))
-            k_out.append((k_bins[i] + k_bins[i+1]) / 2)
-    
+            k_out.append((k_bins[i] + k_bins[i + 1]) / 2)
+
     E_k = np.array(E_k)
     k_out = np.array(k_out)
-    
-    # 归一化到总能量
+
     if np.sum(E_k) > 0:
         E_k = E_k / np.sum(E_k)
-    
+
     return k_out, E_k
 
 
@@ -235,12 +220,14 @@ def evaluate_and_compare(config_name, checkpoint_path, output_dir, time_interval
             # 如果是最后一个窗口的最后一个采样点，计算能量谱
             if window_idx == time_windows[-1] and idx == len(sample_indices) - 1:
                 print(f"  计算最终能量谱 (t={t_i:.4f})...")
-                # 重塑为2D
-                w_ref_2d = np.array(w_ref_i).reshape(nx, ny)
-                w_pred_2d = np.array(w_pred).reshape(nx, ny)
-                
-                k_ref, E_ref = compute_energy_spectrum_2d(w_ref_2d, nx, ny)
-                k_pred, E_pred = compute_energy_spectrum_2d(w_pred_2d, nx, ny)
+                # 重塑为2D，按 Figure 2(e) 使用 velocity energy spectrum
+                u_ref_2d = np.array(u_ref_i).reshape(nx, ny)
+                v_ref_2d = np.array(v_ref_i).reshape(nx, ny)
+                u_pred_2d = np.array(u_pred).reshape(nx, ny)
+                v_pred_2d = np.array(v_pred).reshape(nx, ny)
+
+                k_ref, E_ref = compute_velocity_energy_spectrum_2d(u_ref_2d, v_ref_2d, nx, ny)
+                k_pred, E_pred = compute_velocity_energy_spectrum_2d(u_pred_2d, v_pred_2d, nx, ny)
                 
                 last_spectrum_k = k_ref
                 last_spectrum_ref = E_ref

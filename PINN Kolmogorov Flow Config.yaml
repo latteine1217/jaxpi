@@ -1,0 +1,281 @@
+wandb_version: 1
+
+_wandb:
+  desc: null
+  value:
+    python_version: 3.13.11
+    cli_version: 0.24.0
+    framework: torch
+    is_jupyter_run: false
+    is_kaggle_kernel: false
+    start_time: 1768904953
+    t:
+      1:
+      - 1
+      - 12
+      - 45
+      2:
+      - 1
+      - 12
+      - 45
+      3:
+      - 4
+      - 13
+      - 15
+      - 16
+      - 42
+      - 61
+      4: 3.13.11
+      5: 0.24.0
+      13: linux-x86_64
+    e:
+      4m08e1jgqxy4swif7bizai3ss6skxtex:
+        os: Linux-5.15.0-139-generic-x86_64-with-glibc2.35
+        python: CPython 3.13.11
+        started_at: '2026-01-20T10:29:13.419674Z'
+        args:
+        - --config=examples/kolmogorov_flow/configs/soap.py
+        - --workdir=/home/junyi/jaxpi/examples/kolmogorov_flow/results_soap_2gpu_2894
+        - --config.training.max_steps=20000
+        - --config.training.batch_size_per_device=2048
+        - --config.training.num_time_windows=25
+        program: /home/junyi/jaxpi/examples/kolmogorov_flow/main.py
+        code_path: examples/kolmogorov_flow/main.py
+        code_path_local: examples/kolmogorov_flow/main.py
+        git:
+          remote_url: https://github.com/PredictiveIntelligenceLab/jaxpi.git
+          commit: 9b5196b846285c32a8f2e337982d19699de85956
+        root: /home/junyi/jaxpi
+        host: acmt20
+        executable: /home/junyi/jaxpi/.venv/bin/python3
+        cpu_count: 24
+        cpu_count_logical: 48
+        gpu_type: Tesla P100-PCIE-16GB
+        gpu_count: 2
+        disk:
+          /:
+            total: '105089261568'
+            used: '37650944000'
+        memory:
+          total: '117781905408'
+        gpu_nvidia:
+        - name: Tesla P100-PCIE-16GB
+          memory_total: '17179869184'
+          cuda_cores: 3584
+          architecture: Pascal
+          uuid: GPU-f1eb9b03-217f-8d89-bb64-14c07e76cace
+        - name: Tesla P100-PCIE-16GB
+          memory_total: '17179869184'
+          cuda_cores: 3584
+          architecture: Pascal
+          uuid: GPU-a8160165-9a82-709d-705f-c4ef88a8cab1
+        cuda_version: '12.2'
+        slurm:
+          step_nodelist: acmt20
+          launch_node_ipaddr: 127.0.0.1
+          mpi_type: pmi2
+          working_cluster: acmt:acmt0:6817:9472:109
+          cpu_bind_verbose: quiet
+          cpus_per_task: '8'
+          cluster_name: acmt
+          job_partition: r740
+          job_uid: '10004'
+          mem_per_node: '49152'
+          step_launcher_port: '35191'
+          cpu_bind_list: '0x000055000055'
+          cpus_on_node: '8'
+          nodeid: '0'
+          job_user: junyi
+          step_gpus: 0,1
+          tasks_per_node: '1'
+          procid: '0'
+          topology_addr_pattern: node
+          job_gid: '10005'
+          cpu_bind_type: 'mask_cpu:'
+          job_account: lab
+          job_num_nodes: '1'
+          job_nodelist: acmt20
+          job_gpus: 0,1
+          nodelist: acmt20
+          job_name: kf_soap_2gpu
+          node_aliases: (null)
+          submit_dir: /home/junyi/jaxpi
+          srun_comm_port: '35191'
+          localid: '0'
+          job_cpus_per_node_pack_group_0: '8'
+          jobid: '2894'
+          gtids: '0'
+          step_tasks_per_node: '1'
+          nprocs: '1'
+          step_num_nodes: '1'
+          job_cpus_per_node: '8'
+          stepid: '0'
+          job_qos: normal
+          prio_process: '0'
+          step_id: '0'
+          submit_host: acmt0
+          distribution: cyclic
+          ntasks: '1'
+          gpus_on_node: '2'
+          cpu_bind: quiet,mask_cpu:0x000055000055
+          nnodes: '1'
+          srun_comm_host: 127.0.0.1
+          job_id: '2894'
+          step_num_tasks: '1'
+          conf: /etc/slurm/slurm.conf
+          task_pid: '295792'
+          umask: '0027'
+          topology_addr: acmt20
+        writer_id: 4m08e1jgqxy4swif7bizai3ss6skxtex
+arch:
+  desc: null
+  value:
+    activation: swish
+    arch_name: PirateNet
+    fourier_emb:
+      embed_dim: 192
+      embed_scale: 2.0
+    hidden_dim: 384
+    nonlinearity: 0.0
+    num_layers: 4
+    out_dim: 3
+    periodicity:
+      axis:
+      - 1
+      - 2
+      period:
+      - 6.283185307179586
+      - 6.283185307179586
+      trainable:
+      - false
+      - false
+    pi_init: null
+    reparam:
+      mean: 1.0
+      stddev: 0.1
+      type: weight_fact
+dataset_path:
+  desc: null
+  value: examples/kolmogorov_flow/data/kolmogorov_flow_Re10000_256.npy
+dns_mode:
+  desc: null
+  value: false
+dns_time_range:
+  desc: null
+  value: null
+dns_time_stride:
+  desc: null
+  value: 1
+input_dim:
+  desc: null
+  value: 3
+logging:
+  desc: null
+  value:
+    eval_space_chunk_size: 4096
+    eval_space_samples: 8192
+    eval_time_chunk_seconds: 1.0
+    eval_time_samples: 8
+    log_cossim: false
+    log_errors: false
+    log_every_steps: 100
+    log_grads: false
+    log_losses: true
+    log_lr: false
+    log_nonlinearities: false
+    log_ntk: false
+    log_preds: false
+    log_weights: true
+mode:
+  desc: null
+  value: train
+optim:
+  desc: null
+  value:
+    beta1: 0.9
+    beta2: 0.999
+    decay_rate: 0.9
+    decay_steps: 2000
+    eps: 1.0e-08
+    grad_accum_steps: 0
+    learning_rate: 0.001
+    optimizer: Soap
+    schedule_free: false
+    staircase: false
+    warmup_steps: 2000
+optimization:
+  desc: null
+  value:
+    use_eval_checkpoint: false
+    use_vmap_chunking: false
+    vmap_chunk_size: 512
+saving:
+  desc: null
+  value:
+    ckpt_dir: null
+    num_keep_ckpts: 2
+    overwrite: true
+    save_every_steps: 5000
+seed:
+  desc: null
+  value: 42
+sensor_batch_size_per_device:
+  desc: null
+  value: null
+sensor_json:
+  desc: null
+  value: null
+sensor_time_shift:
+  desc: null
+  value: true
+sensor_values:
+  desc: null
+  value: null
+time_fraction:
+  desc: null
+  value: 1.0
+training:
+  desc: null
+  value:
+    batch_size_per_device: 2048
+    max_steps: 20000
+    num_time_windows: 25
+transfer_learning:
+  desc: null
+  value: true
+transfer_optimizer_state:
+  desc: null
+  value: false
+wandb:
+  desc: null
+  value:
+    group: optimizer_comparison
+    name: soap_Re10000
+    notes: 實驗配置：SOAP optimizer, L=4, hidden_dim=384, swish activation, transfer_learning=True
+    project: PINN-Kolmogorov_flow
+    sweep_id: null
+    tags:
+    - soap
+    - 2gpu
+    - Re10000
+    - paper_aligned
+    - L=4
+    - hidden_dim=384
+weighting:
+  desc: null
+  value:
+    causal_tol: 1.0
+    init_weights:
+      rc: 1.0
+      ru: 1.0
+      rv: 1.0
+      u_data: 0.0
+      u_ic: 100.0
+      v_data: 0.0
+      v_ic: 100.0
+      w_data: 0.0
+    momentum: 0.9
+    num_chunks: 16
+    scheme: grad_norm
+    update_every_steps: 1000
+    use_causal: true

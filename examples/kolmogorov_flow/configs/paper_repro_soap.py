@@ -73,7 +73,7 @@ def get_config():
     optim.decay_rate = 0.9
     optim.decay_steps = 2000
     optim.staircase = False
-    optim.warmup_steps = 22000
+    optim.warmup_steps = 2000
     optim.grad_clip_norm = 1.0
     optim.grad_accum_steps = 0
     optim.schedule_free = True

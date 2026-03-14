@@ -53,6 +53,5 @@
     - #SBATCH --time=14-00:00:00
     - #SBATCH --partition=r740
     - #SBATCH --mem=100G
-    - #SBATCH --gres=gpu:2 (兩張Nvidia P100)
+    - #SBATCH --gres=gpu:2 (兩張 RTX 3090 Turbo)
 - 使用 `python3`而非`python`  
-
