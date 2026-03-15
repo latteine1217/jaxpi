@@ -85,60 +85,48 @@ def _create_arch(config):
 
 
 def _create_optimizer(config):
-
     lr = optax.exponential_decay(
         init_value=config.learning_rate,
         transition_steps=config.decay_steps,
         decay_rate=config.decay_rate,
-        staircase=config.staircase
-        )
+        staircase=config.staircase,
+    )
 
     if config.warmup_steps > 0:
-        warmup = optax.linear_schedule(init_value=0.0, end_value=config.learning_rate,
-                                       transition_steps=config.warmup_steps)
+        warmup = optax.linear_schedule(
+            init_value=0.0, end_value=config.learning_rate, transition_steps=config.warmup_steps
+        )
 
         lr = optax.join_schedules([warmup, lr], [config.warmup_steps])
 
     if config.optimizer == "Adam":
-        tx = optax.adam(
-            learning_rate=lr, b1=config.beta1, b2=config.beta2, eps=config.eps
-        )
+        tx = optax.adam(learning_rate=lr, b1=config.beta1, b2=config.beta2, eps=config.eps)
 
     elif config.optimizer == "Soap":
-
         tx = soap(
-            learning_rate=lr, b1=config.beta1, b2=config.beta2, weight_decay=0.0, precondition_frequency=2
-            )
-
+            learning_rate=lr,
+            b1=config.beta1,
+            b2=config.beta2,
+            weight_decay=0.0,
+            precondition_frequency=2,
+        )
 
     elif config.optimizer == "Kron":
-            tx = kron(
-                learning_rate=lr, b1=config.beta1
-                )
+        tx = kron(learning_rate=lr, b1=config.beta1)
 
     elif config.optimizer == "Muon":
         tx = optax.contrib.muon(
-            learning_rate=lr,
-            ns_coeffs=(2, -1.5, 0.5),
-            ns_steps=10,
-            beta=0.99,
-            adam_b1=0.99
+            learning_rate=lr, ns_coeffs=(2, -1.5, 0.5), ns_steps=10, beta=0.99, adam_b1=0.99
         )
 
     elif config.optimizer == "Lamb":
-        tx = optax.lamb(
-            learning_rate=lr, b1=config.beta1, b2=config.beta2, eps=config.eps
-        )
+        tx = optax.lamb(learning_rate=lr, b1=config.beta1, b2=config.beta2, eps=config.eps)
 
     elif config.optimizer == "Adagrad":
-        tx = optax.adagrad(
-            learning_rate=lr, eps=config.eps
-        )
+        tx = optax.adagrad(learning_rate=lr, eps=config.eps)
 
     elif config.optimizer == "RMSProp":
-        tx = optax.rmsprop(
-            learning_rate=lr
-        )
+        tx = optax.rmsprop(learning_rate=lr)
 
     if config.schedule_free:
         tx = optax.contrib.schedule_free(tx, lr, b1=config.beta1)
@@ -159,7 +147,7 @@ def _create_train_state(
 ):
     """
     建立TrainState，支援可選的優化器狀態遷移
-    
+
     Parameters
     ----------
     config : ml_collections.ConfigDict
@@ -172,7 +160,7 @@ def _create_train_state(
         優化器狀態（若提供則直接使用，否則初始化）
     step : Optional[int]
         訓練步數（若為None則從0開始）
-    
+
     Returns
     -------
     TrainState (replicated across devices)
@@ -194,9 +182,10 @@ def _create_train_state(
     if opt_state is not None:
         # 路徑A：使用提供的opt_state（遷移學習）
         import logging
+
         logger = logging.getLogger(__name__)
         logger.info("建立TrainState並使用提供的opt_state（遷移學習模式）")
-        
+
         # 方案1：嘗試直接構造
         try:
             state = TrainState(
@@ -219,10 +208,7 @@ def _create_train_state(
                 weights=weights,
                 momentum=config.weighting.momentum,
             )
-            state = temp_state.replace(
-                opt_state=opt_state,
-                step=step if step is not None else 0
-            )
+            state = temp_state.replace(opt_state=opt_state, step=step if step is not None else 0)
     else:
         # 路徑B：標準初始化（現有行為）
         state = TrainState.create(
@@ -242,6 +228,15 @@ class PINN:
     def __init__(self, config, replicate_state=True):
         self.config = config
         self.state = _create_train_state(config, replicate=replicate_state)
+
+        # Compute at Python/trace time: keys whose init_weight is exactly 0.
+        # These keys produce a constant-zero loss when no data is supplied, so
+        # their grad-norm is always 0 and must be excluded from mean_grad_norm
+        # to avoid diluting the adaptive weights for the active loss terms.
+        # Stored as a frozenset so it is hashable and safe under @jit static_argnums.
+        self._zero_weight_keys: frozenset = frozenset(
+            k for k, v in config.weighting.init_weights.items() if float(v) == 0.0
+        )
 
     def u_net(self, params, *args):
         raise NotImplementedError("Subclasses should implement this!")
@@ -273,19 +268,30 @@ class PINN:
             loss_dict = self.losses(params, batch, *args)
             loss_keys = tuple(loss_dict.keys())
 
+            # Keys in _zero_weight_keys always have a constant-zero loss value
+            # (e.g. data terms when no sensor data is provided).  Their grad-norm
+            # is identically zero and must be excluded from mean_grad_norm so they
+            # do not dilute the adaptive weights for the active loss terms.
+            # _zero_weight_keys is a frozenset computed at Python level in __init__,
+            # so this branch is resolved at trace time and is safe under @jit.
+            active_keys = tuple(k for k in loss_keys if k not in self._zero_weight_keys)
+            inactive_keys = tuple(k for k in loss_keys if k in self._zero_weight_keys)
+
             grad_norm_dict = {}
-            for key in loss_keys:
+            for key in active_keys:
                 loss_fn = lambda p, key=key: self.losses(p, batch, *args)[key]
                 g = grad(loss_fn)(params)
                 flattened_grad = flatten_pytree(g)
                 grad_norm_dict[key] = jnp.linalg.norm(flattened_grad)
 
-            # Compute the mean of grad norms over all losses
+            # Compute the mean of grad norms over active losses only
             mean_grad_norm = jnp.mean(jnp.stack(tree_leaves(grad_norm_dict)))
-            # Grad Norm Weighting
-            w = tree_map(
-                lambda x: (mean_grad_norm / (x + 1e-5 * mean_grad_norm)), grad_norm_dict
-            )
+            # Grad Norm Weighting for active keys
+            w = tree_map(lambda x: (mean_grad_norm / (x + 1e-5 * mean_grad_norm)), grad_norm_dict)
+            # Restore inactive (zero-weight) keys with their original weight so
+            # that the EMA in apply_weights sees a complete weight dict.
+            for key in inactive_keys:
+                w[key] = jnp.array(float(self.config.weighting.init_weights[key]))
 
         elif self.config.weighting.scheme == "ntk":
             # Compute the diagonal of the NTK of each loss
