@@ -47,11 +47,15 @@ def get_config():
     )
     # Paper appendix: Fourier features sampled from N(0, 2).
     arch.fourier_emb = ml_collections.ConfigDict({"embed_scale": 2.0, "embed_dim": 384})
-    arch.reparam = ml_collections.ConfigDict(
-        {"type": "weight_fact", "mean": 1.0, "stddev": 0.1}
-    )
+    arch.reparam = ml_collections.ConfigDict({"type": "weight_fact", "mean": 1.0, "stddev": 0.1})
     arch.nonlinearity = 0.0
     arch.pi_init = None
+
+    # Body force: f(x,y) = [A * sin(2π * k * y), 0]
+    # 論文 2507.08972 設定：A=0.1，k=2（在 [0,1]² 域）
+    config.body_force = body_force = ml_collections.ConfigDict()
+    body_force.amplitude = 0.1  # 強迫振幅 A
+    body_force.wavenumber = 2.0  # 注入能量波數 k（[0,1] 域下的模態數）
 
     # Data: pure PINN reproduction, so all data constraints remain disabled.
     config.time_fraction = 1.0

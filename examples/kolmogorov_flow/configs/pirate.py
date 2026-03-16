@@ -16,7 +16,15 @@ def get_config():
     wandb.project = "PINN-Kolmogorov_flow"
     wandb.name = "pirate"
     wandb.group = "optimizer_comparison"  # 實驗分組方便比較
-    wandb.tags = ["adam", "pirate", "2gpu", "Re10000", "paper_aligned", "L=2", "hidden_dim=768"]  # 標籤
+    wandb.tags = [
+        "adam",
+        "pirate",
+        "2gpu",
+        "Re10000",
+        "paper_aligned",
+        "L=2",
+        "hidden_dim=768",
+    ]  # 標籤
     wandb.notes = "論文對齊配置：Adam optimizer, L=2 (9 layers), hidden_dim=768, swish activation, transfer_learning=True"  # 備註
     wandb.sweep_id = None  # Sweep ID (超參數調優時自動填入)
 
@@ -30,12 +38,18 @@ def get_config():
     arch.periodicity = ml_collections.ConfigDict(
         {"period": (2 * jnp.pi, 2 * jnp.pi), "axis": (1, 2), "trainable": (False, False)}
     )
-    arch.fourier_emb = ml_collections.ConfigDict({"embed_scale": 2.0, "embed_dim": 384})  # embed_dim = hidden_dim // 2
-    arch.reparam = ml_collections.ConfigDict(
-        {"type": "weight_fact", "mean": 1.0, "stddev": 0.1}
-    )
+    arch.fourier_emb = ml_collections.ConfigDict(
+        {"embed_scale": 2.0, "embed_dim": 384}
+    )  # embed_dim = hidden_dim // 2
+    arch.reparam = ml_collections.ConfigDict({"type": "weight_fact", "mean": 1.0, "stddev": 0.1})
     arch.nonlinearity = 0.0
     arch.pi_init = None
+
+    # Body force: f(x,y) = [A * sin(2π * k * y), 0]
+    # 論文 2507.08972 設定：A=0.1，k=2（在 [0,1]² 域）
+    config.body_force = body_force = ml_collections.ConfigDict()
+    body_force.amplitude = 0.1  # 強迫振幅 A
+    body_force.wavenumber = 2.0  # 注入能量波數 k（[0,1] 域下的模態數）
 
     # Data
     config.time_fraction = 1.0
@@ -92,8 +106,10 @@ def get_config():
     # Memory Optimization（記憶體優化配置）
     config.optimization = optimization = ml_collections.ConfigDict()
     optimization.use_vmap_chunking = False  # 啟用 vmap 分塊優化（建議 GPU < 16GB 時啟用）
-    optimization.vmap_chunk_size = 512      # vmap 分塊大小（僅當 use_vmap_chunking=True 時生效）
-    optimization.use_eval_checkpoint = False  # 評估時使用 gradient checkpointing（極度記憶體受限時啟用）
+    optimization.vmap_chunk_size = 512  # vmap 分塊大小（僅當 use_vmap_chunking=True 時生效）
+    optimization.use_eval_checkpoint = (
+        False  # 評估時使用 gradient checkpointing（極度記憶體受限時啟用）
+    )
 
     # Logging
     config.logging = logging = ml_collections.ConfigDict()
@@ -138,6 +154,7 @@ def _validate_config(config):
     注意：從嚴格錯誤改為警告，因為 train.py 會自動調整 batch size
     """
     import warnings
+
     batch_size_per_device = config.training.batch_size_per_device
     num_chunks = config.weighting.num_chunks
 
@@ -152,6 +169,7 @@ def _validate_config(config):
     # 檢查 2：只有在 use_causal = True 時才需要檢查 num_chunks
     if not config.weighting.use_causal and num_chunks > 1:
         import warnings
+
         warnings.warn(
             f"use_causal is False but num_chunks is {num_chunks}. "
             "num_chunks will be ignored since causal weighting is disabled."
@@ -163,10 +181,13 @@ def _validate_config(config):
         hidden_dim = config.arch.hidden_dim
         if embed_dim != hidden_dim // 2:
             import warnings
+
             warnings.warn(
                 f"Fourier embed_dim ({embed_dim}) is not hidden_dim // 2 ({hidden_dim // 2}). "
                 "This may affect network performance."
             )
 
-    print(f"✓ Configuration validated: batch_size_per_device={batch_size_per_device}, num_chunks={num_chunks}")
+    print(
+        f"✓ Configuration validated: batch_size_per_device={batch_size_per_device}, num_chunks={num_chunks}"
+    )
     print(f"  Each chunk will contain {batch_size_per_device // num_chunks} samples per device")

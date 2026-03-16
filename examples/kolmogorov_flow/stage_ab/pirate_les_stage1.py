@@ -33,11 +33,15 @@ def get_config():
         {"period": (2 * jnp.pi, 2 * jnp.pi), "axis": (1, 2), "trainable": (False, False)}
     )
     arch.fourier_emb = ml_collections.ConfigDict({"embed_scale": 2.0, "embed_dim": 768})
-    arch.reparam = ml_collections.ConfigDict(
-        {"type": "weight_fact", "mean": 1.0, "stddev": 0.1}
-    )
+    arch.reparam = ml_collections.ConfigDict({"type": "weight_fact", "mean": 1.0, "stddev": 0.1})
     arch.nonlinearity = 0.0
     arch.pi_init = None
+
+    # Body force: f(x,y) = [A * sin(2π * k * y), 0]
+    # Re=100000 LES 設定：A=0.1，k=2（在 [0,1]² 域）
+    config.body_force = body_force = ml_collections.ConfigDict()
+    body_force.amplitude = 0.1  # 強迫振幅 A
+    body_force.wavenumber = 2.0  # 注入能量波數 k（[0,1] 域下的模態數）
 
     # Data (LES dense data constraint)
     config.time_fraction = 1.0
@@ -109,7 +113,9 @@ def get_config():
     # Logging
     config.logging = logging = ml_collections.ConfigDict()
     logging.log_every_steps = 100
-    logging.log_errors = False  # 僅在需要正式 reference error 評估時開啟，平時訓練關閉以避免額外計算成本
+    logging.log_errors = (
+        False  # 僅在需要正式 reference error 評估時開啟，平時訓練關閉以避免額外計算成本
+    )
     logging.log_losses = True
     logging.log_weights = True
     logging.log_lr = False
@@ -166,5 +172,7 @@ def _validate_config(config):
                 "This may affect network performance."
             )
 
-    print(f"✓ Configuration validated: batch_size_per_device={batch_size_per_device}, num_chunks={num_chunks}")
+    print(
+        f"✓ Configuration validated: batch_size_per_device={batch_size_per_device}, num_chunks={num_chunks}"
+    )
     print(f"  Each chunk will contain {batch_size_per_device // num_chunks} samples per device")

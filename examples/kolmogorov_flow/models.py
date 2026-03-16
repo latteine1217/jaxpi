@@ -33,13 +33,27 @@ class NavierStokes(ForwardIVP):
 
         self.nu = nu
 
-        self.body_force_fn = lambda x, y: 2 * jnp.sin(4 * jnp.pi * y)
+        # 從 config 讀取體積力參數，預設值對齊論文 2507.08972：
+        #   f(x, y) = [A * sin(2π * k * y), 0]，A=0.1，k=2（在 [0,1]² 域）
+        # Why: 避免硬編碼導致不同 Re/domain 實驗使用錯誤的強迫振幅與波數。
+        _bf = getattr(config, "body_force", None)
+        if _bf is not None:
+            A = float(getattr(_bf, "amplitude", 0.1))
+            k = float(getattr(_bf, "wavenumber", 2.0))
+        else:
+            A = 0.1
+            k = 2.0
+        self.body_force_fn = lambda x, y: A * jnp.sin(2 * jnp.pi * k * y)
 
         # 檢查是否啟用 vmap 分塊優化
-        self.use_vmap_chunking = getattr(config, 'optimization', None) is not None and \
-                                  getattr(config.optimization, 'use_vmap_chunking', False)
-        self.vmap_chunk_size = getattr(getattr(config, 'optimization', None), 'vmap_chunk_size', 512) \
-                               if self.use_vmap_chunking else None
+        self.use_vmap_chunking = getattr(config, "optimization", None) is not None and getattr(
+            config.optimization, "use_vmap_chunking", False
+        )
+        self.vmap_chunk_size = (
+            getattr(getattr(config, "optimization", None), "vmap_chunk_size", 512)
+            if self.use_vmap_chunking
+            else None
+        )
 
         # Predictions over a grid
         self.u_ic_pred_fn = vmap(self.u_net, (None, None, 0, 0))
@@ -139,6 +153,7 @@ class NavierStokes(ForwardIVP):
 
             def process_time_step(t_single):
                 """處理單個時間步的所有空間點（分塊）"""
+
                 def space_scan(_, xs):
                     x_chunk, y_chunk, mask_chunk = xs
                     pred_chunk = vmap(net_fn, (None, None, 0, 0))(
@@ -524,6 +539,7 @@ class NavierStokes(ForwardIVP):
             time_chunk_size,
             space_chunk_size,
         )
+
 
 class NavierStokesEvaluator(BaseEvaluator):
     def __init__(self, config, model):
