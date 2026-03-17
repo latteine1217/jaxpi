@@ -16,21 +16,21 @@ def get_config():
     # Weights & Biases
     config.wandb = wandb = ml_collections.ConfigDict()
     wandb.project = "PINN-Kolmogorov_flow"
-    wandb.name = "paper_repro_soap"
-    wandb.group = "paper_reproduction"
+    wandb.name = "re1e6_n2048_ke024_soap"
+    wandb.group = "re1e6_training"
     wandb.tags = [
-        "paper_repro",
         "soap",
         "kolmogorov",
         "pure_pinn",
         "no_data_constraint",
-        "L=2",
+        "Re1e6",
+        "N2048",
         "hidden_dim=768",
     ]
     wandb.notes = (
-        "2507.08972v2-oriented pure PINN Kolmogorov reproduction: PirateNet, "
-        "2 residual blocks, hidden_dim=768, swish, SOAP, schedule_free=True, "
-        "warmup=22000, no data constraints."
+        "Pure PINN Kolmogorov Re=1e6, N=2048, T=5, ke024 DNS as reference. "
+        "PirateNet, 2 residual blocks, hidden_dim=768, swish, SOAP, schedule_free=True. "
+        "DNS validated: energy balance <0.1%, divergence ~1e-15, k^-3 spectrum."
     )
     wandb.sweep_id = None
 
@@ -59,7 +59,7 @@ def get_config():
 
     # Data: pure PINN reproduction, so all data constraints remain disabled.
     config.time_fraction = 1.0
-    config.dataset_path = "examples/kolmogorov_flow/data/kolmogorov_flow_Re10000_256.npy"
+    config.dataset_path = "examples/kolmogorov_flow/data/kolmogorov_dns/kolmogorov_Re1e6_N2048_T5_ke024.npy"
     config.dns_time_range = None
     config.dns_time_stride = 1
     config.sensor_json = None
