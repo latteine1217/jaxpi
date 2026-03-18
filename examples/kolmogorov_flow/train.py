@@ -577,7 +577,36 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
         sensor_batch_per_device = config.training.batch_size_per_device
     sensor_global_batch_size = sensor_batch_per_device * parallel_state["num_devices"]
 
-    for idx in range(config.training.num_time_windows):
+    # 接續訓練：從指定 window 開始（預設 0，即從頭訓練）
+    # 若 start_window > 0，需從前一個 window 的 ckpt 重建 IC（PINN 預測值，非 DNS 資料）
+    start_window = int(config.get("start_window", 0))
+    if start_window < 0 or start_window >= config.training.num_time_windows:
+        raise ValueError(
+            f"start_window={start_window} 超出範圍 [0, {config.training.num_time_windows})"
+        )
+    if start_window > 0:
+        logging.info(f"接續訓練：從 window {start_window + 1}/{config.training.num_time_windows} 開始")
+        ckpt_path = os.path.join(
+            os.getcwd(), config.wandb.name, "ckpt", f"time_window_{start_window}"
+        )
+        logging.info(f"從 {ckpt_path} 載入 ckpt 以重建 IC")
+        _tmp_model = models.NavierStokes(
+            config, t, coords, u0, v0, w0, nu, replicate_state=False
+        )
+        _tmp_state = restore_checkpoint(_tmp_model.state, ckpt_path)
+        u0 = _tmp_model.u_ic_pred_fn(
+            _tmp_state.params, t_star[num_time_steps * start_window], coords[:, 0], coords[:, 1]
+        )
+        v0 = _tmp_model.v_ic_pred_fn(
+            _tmp_state.params, t_star[num_time_steps * start_window], coords[:, 0], coords[:, 1]
+        )
+        w0 = _tmp_model.w_ic_pred_fn(
+            _tmp_state.params, t_star[num_time_steps * start_window], coords[:, 0], coords[:, 1]
+        )
+        del _tmp_model, _tmp_state
+        logging.info(f"IC 重建完成，準備從 window {start_window + 1} 開始訓練")
+
+    for idx in range(start_window, config.training.num_time_windows):
         logging.info("Training time window {}".format(idx + 1))
         if use_windowed_data and window_files is not None:
             window_path = str(window_files[idx])

@@ -142,6 +142,7 @@ def get_config():
 
     config.input_dim = 3
     config.seed = 42
+    config.start_window = 0  # 接續訓練起始 window（0 = 從頭）
 
     _validate_config(config)
 
