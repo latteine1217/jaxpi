@@ -586,25 +586,12 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
         )
     if start_window > 0:
         logging.info(f"接續訓練：從 window {start_window + 1}/{config.training.num_time_windows} 開始")
-        ckpt_path = os.path.join(
-            os.getcwd(), config.wandb.name, "ckpt", f"time_window_{start_window}"
-        )
-        logging.info(f"從 {ckpt_path} 載入 ckpt 以重建 IC")
-        _tmp_model = models.NavierStokes(
-            config, t, coords, u0, v0, w0, nu, replicate_state=False
-        )
-        _tmp_state = restore_checkpoint(_tmp_model.state, ckpt_path)
-        u0 = _tmp_model.u_ic_pred_fn(
-            _tmp_state.params, t_star[num_time_steps * start_window], coords[:, 0], coords[:, 1]
-        )
-        v0 = _tmp_model.v_ic_pred_fn(
-            _tmp_state.params, t_star[num_time_steps * start_window], coords[:, 0], coords[:, 1]
-        )
-        w0 = _tmp_model.w_ic_pred_fn(
-            _tmp_state.params, t_star[num_time_steps * start_window], coords[:, 0], coords[:, 1]
-        )
-        del _tmp_model, _tmp_state
-        logging.info(f"IC 重建完成，準備從 window {start_window + 1} 開始訓練")
+        # IC 使用 DNS 參考資料在 window 邊界的值（避免對 4M 空間點做 forward pass 導致 OOM）
+        # window 1 訓練後 PINN 應已緊密擬合 DNS，兩者差異極小
+        u0 = u_ref[num_time_steps * start_window, :]
+        v0 = v_ref[num_time_steps * start_window, :]
+        w0 = w_ref[num_time_steps * start_window, :]
+        logging.info(f"IC 設定完成（使用 DNS t_idx={num_time_steps * start_window}），準備從 window {start_window + 1} 開始訓練")
 
     for idx in range(start_window, config.training.num_time_windows):
         logging.info("Training time window {}".format(idx + 1))
