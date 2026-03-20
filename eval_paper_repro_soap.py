@@ -27,7 +27,10 @@ for p in [ROOT_DIR, EXAMPLE_DIR]:
 
 # ── 設定 ────────────────────────────────────────────────────────────────────
 CONFIG_PATH = os.path.join(EXAMPLE_DIR, "configs", "paper_repro_soap.py")
-CKPT_ROOT = os.path.join(ROOT_DIR, "paper_repro_soap", "ckpt")
+CKPT_ROOT = os.environ.get(
+    "EVAL_CKPT_ROOT",
+    os.path.join(ROOT_DIR, "re1e6_n2048_ke024_soap", "ckpt"),
+)
 OUTPUT_DIR = os.path.join(ROOT_DIR, "eval_paper_repro_soap")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
