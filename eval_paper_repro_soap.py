@@ -50,6 +50,15 @@ def load_config(config_path: str):
     return mod.get_config()
 
 
+def pred_chunked(pred_fn, params, t_val, x, y, chunk_size=65536):
+    """分批呼叫 pred_fn 避免 4M 點一次 forward pass 導致 OOM。"""
+    n = x.shape[0]
+    out = []
+    for i in range(0, n, chunk_size):
+        out.append(pred_fn(params, t_val, x[i:i+chunk_size], y[i:i+chunk_size]))
+    return np.concatenate([np.array(o) for o in out])
+
+
 def discover_windows(ckpt_root: str) -> list[int]:
     dirs = [d for d in os.listdir(ckpt_root) if d.startswith("time_window_")]
     wins = []
@@ -226,9 +235,9 @@ def main():
         x_c, y_c = coords[:, 0], coords[:, 1]
         for idx_i in sample_idx:
             t_i = float(t_win[idx_i])
-            u_p = model.u_ic_pred_fn(model.state.params, t_i, x_c, y_c)
-            v_p = model.v_ic_pred_fn(model.state.params, t_i, x_c, y_c)
-            w_p = model.w_ic_pred_fn(model.state.params, t_i, x_c, y_c)
+            u_p = pred_chunked(model.u_ic_pred_fn, model.state.params, t_i, x_c, y_c)
+            v_p = pred_chunked(model.v_ic_pred_fn, model.state.params, t_i, x_c, y_c)
+            w_p = pred_chunked(model.w_ic_pred_fn, model.state.params, t_i, x_c, y_c)
 
             ur = u_ref_win[idx_i, :]
             vr = v_ref_win[idx_i, :]
@@ -247,9 +256,9 @@ def main():
 
         # ── last time-step field + spectrum (only last available window) ───────
         t_last = float(t_win[-1])
-        u_p_last = np.array(model.u_ic_pred_fn(model.state.params, t_last, x_c, y_c))
-        v_p_last = np.array(model.v_ic_pred_fn(model.state.params, t_last, x_c, y_c))
-        w_p_last = np.array(model.w_ic_pred_fn(model.state.params, t_last, x_c, y_c))
+        u_p_last = pred_chunked(model.u_ic_pred_fn, model.state.params, t_last, x_c, y_c)
+        v_p_last = pred_chunked(model.v_ic_pred_fn, model.state.params, t_last, x_c, y_c)
+        w_p_last = pred_chunked(model.w_ic_pred_fn, model.state.params, t_last, x_c, y_c)
         w_r_last = np.array(w_ref_win[-1, :])
         u_r_last = np.array(u_ref_win[-1, :])
         v_r_last = np.array(v_ref_win[-1, :])
