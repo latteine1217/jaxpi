@@ -310,9 +310,9 @@ class NavierStokes(ForwardIVP):
         # residual loss
         if self.config.weighting.use_causal == True:
             ru_l, rv_l, rc_l, gamma = self.res_and_w(params, res_batch)
-            ru_loss = jnp.mean(ru_l)
-            rv_loss = jnp.mean(rv_l)
-            rc_loss = jnp.mean(rc_l)
+            ru_loss = jnp.mean(gamma * ru_l)
+            rv_loss = jnp.mean(gamma * rv_l)
+            rc_loss = jnp.mean(gamma * rc_l)
         else:
             # 非 causal 路徑直接對殘差 batch 做逐點 residual 計算。
             res_batch = jnp.reshape(res_batch, (-1, res_batch.shape[-1]))
