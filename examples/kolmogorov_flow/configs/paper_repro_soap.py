@@ -77,7 +77,7 @@ def get_config():
     optim.decay_rate = 0.9
     optim.decay_steps = 2000
     optim.staircase = False
-    optim.warmup_steps = 2000
+    optim.warmup_steps = 2000  # Table 2: 2,000 warmup steps (body text 22k is a typo)
     optim.grad_clip_norm = 1.0
     optim.grad_accum_steps = 0
     optim.schedule_free = True
@@ -87,7 +87,8 @@ def get_config():
     training.max_steps = 100000
     # Reproduction intent: 4096 per device on 2 GPU => total 8192.
     training.batch_size_per_device = 4096
-    training.num_time_windows = 25
+    # Paper Table 2: time window size = 0.1, T=5 → 50 windows (not 25)
+    training.num_time_windows = 50
 
     # Weighting
     config.weighting = weighting = ml_collections.ConfigDict()
