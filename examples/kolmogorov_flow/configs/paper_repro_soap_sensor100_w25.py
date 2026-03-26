@@ -74,8 +74,8 @@ def get_config():
         "examples/kolmogorov_flow/data/kolmogorov_sensors/re1000000/"
         "sensors_qrpivot_K100_N2048_t0-5_dns_values.npz"
     )
-    # 50 per GPU × 2 GPUs = 100 sensor data points per training step
-    config.sensor_batch_size_per_device = 50
+    # 48 per GPU × 2 GPUs = 96 sensor data points per step (must be divisible by num_chunks=16)
+    config.sensor_batch_size_per_device = 48
     config.sensor_time_shift = True
     config.use_vorticity_data_loss = False
 
