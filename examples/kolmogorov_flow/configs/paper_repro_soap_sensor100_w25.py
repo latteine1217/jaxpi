@@ -111,8 +111,8 @@ def get_config():
             "ru":        1.0,
             "rv":        1.0,
             "rc":        1.0,
-            "u_data":    1.0,   # sensor u loss enabled
-            "v_data":    1.0,   # sensor v loss enabled
+            "u_data":  100.0,   # sensor u loss, same priority as IC
+            "v_data":  100.0,   # sensor v loss, same priority as IC
             "w_data":    0.0,   # vorticity data loss disabled
         }
     )
