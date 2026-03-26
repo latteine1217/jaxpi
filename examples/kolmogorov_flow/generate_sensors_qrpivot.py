@@ -6,24 +6,30 @@ What:
     Select K spatial locations that are maximally informative across the DNS snapshot ensemble.
 
 Why (algorithm):
-    1. Build snapshot matrix A ∈ ℝ^{n_feat_time × n_spatial} from u, v, p, omega, |∇u|, |∇v|
+    1. Spatially downsample DNS to --spatial-res (default 512) to reduce memory.
+       2048² = 4.2M points → 512² = 262k points (16× smaller snapshot matrix).
+    2. Build snapshot matrix A ∈ ℝ^{n_feat_time × n_spatial_ds} from u, v, p, omega, |∇u|, |∇v|
        sampled at a fixed time stride (e.g. every 0.1s).
-       Shape: (n_features × n_time_sel, n_spatial).
-    2. Truncated SVD via Gram matrix: A A^T (small square matrix) → top-K left singular vectors.
-    3. U_k = A^T V_k / sigma_k ∈ ℝ^{n_spatial × K}: right singular vectors (spatial modes).
-    4. QR with column pivoting on U_k^T → first K pivots = maximally separated, representative
-       spatial locations.
+       Shape: (n_features × n_time_sel, 512²) ≈ (306, 262k) → ~320 MB.
+    3. Truncated SVD via Gram matrix: A A^T (small square matrix) → top-K left singular vectors.
+    4. U_k = A^T V_k / sigma_k ∈ ℝ^{n_spatial_ds × K}: right singular vectors (spatial modes).
+    5. QR with column pivoting on U_k^T → first K pivots = maximally separated sensor positions
+       on the downsampled grid.
+    6. Map downsampled indices back to original grid (stride = orig_res // spatial_res).
+    7. Extract DNS values from the original full-resolution DNS at those exact grid points.
 
-Memory strategy (two-stage, avoids materialising A twice simultaneously):
-    Stage A: build A from sel data → compute Gram matrix → free A → eigendecompose → get V_k.
-    Stage B: rebuild A → compute U_k → QR pivot → free all → load full DNS → extract values.
+Memory budget (512 downsample, K=100, 51 time steps):
+    Snapshot matrix A : 306 × 262k × 4 B ≈ 320 MB
+    U_k              : 262k × 100 × 4 B ≈ 100 MB
+    DNS load (full)  : 4 fields × 101 × 2048² × 4 B ≈ 6.7 GB  (only at end for value extraction)
 
 Usage:
-    uv run python generate_sensors_qrpivot.py \\
-        --dns    examples/kolmogorov_flow/data/kolmogorov_dns/kolmogorov_Re1e6_N2048_T5_ke024.npy \\
-        --outdir examples/kolmogorov_flow/data/kolmogorov_sensors/re1000000 \\
+    python3 generate_sensors_qrpivot.py \\
+        --dns          examples/.../kolmogorov_Re1e6_N2048_T5_ke024.npy \\
+        --outdir       examples/.../kolmogorov_sensors/re1000000 \\
         --K 100 \\
-        --time-stride 2
+        --time-stride  2 \\
+        --spatial-res  512
 
 Outputs:
     sensors_qrpivot_K{K}_N{res}_t{t0}-{t1}.json       — sensor positions + metadata
@@ -56,8 +62,9 @@ def spectral_grad_magnitude(field: np.ndarray) -> np.ndarray:
 
 def build_snapshot_block(i: int, fields: dict) -> np.ndarray:
     """
-    What: Build a (N_FEATURES, n_spatial) block for the i-th selected time step.
+    What: Build a (N_FEATURES, n_spatial_ds) block for the i-th selected time step.
     Why:  Encapsulates the 6-feature stacking so both Stage A and B can call it identically.
+          Fields are already downsampled before being stored in `fields`.
     """
     u = fields["u"][i]
     v = fields["v"][i]
@@ -99,39 +106,52 @@ def build_snapshot_matrix(sel_fields: dict, nt: int, n_spatial: int) -> np.ndarr
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="QR-pivot optimal sensor placement for Kolmogorov DNS")
-    parser.add_argument("--dns",         required=True,  help="Path to DNS .npy file")
-    parser.add_argument("--outdir",      required=True,  help="Output directory")
-    parser.add_argument("--K",           type=int, default=100, help="Number of sensors")
-    parser.add_argument("--time-stride", type=int, default=2,   help="Time stride (1=every step, 2=every 0.1s for dt=0.05)")
+    parser.add_argument("--dns",          required=True,  help="Path to DNS .npy file")
+    parser.add_argument("--outdir",       required=True,  help="Output directory")
+    parser.add_argument("--K",            type=int, default=100,  help="Number of sensors")
+    parser.add_argument("--time-stride",  type=int, default=2,    help="Time stride (2=every 0.1s for dt=0.05s DNS)")
+    parser.add_argument("--spatial-res",  type=int, default=512,  help="Downsample spatial grid to NxN before QR (default 512)")
     args = parser.parse_args()
 
-    dns_path  = Path(args.dns)
-    out_dir   = Path(args.outdir)
-    K         = args.K
-    stride    = args.time_stride
+    dns_path    = Path(args.dns)
+    out_dir     = Path(args.outdir)
+    K           = args.K
+    stride      = args.time_stride
+    spatial_res = args.spatial_res
 
     print(f"Loading DNS: {dns_path}")
     raw = np.load(dns_path, allow_pickle=True).item()
-    time_all  = np.array(raw["time"])           # (nt_full,)
-    x_coords  = np.array(raw["x"])             # (nx,)
-    y_coords  = np.array(raw["y"])             # (ny,)
+    time_all = np.array(raw["time"])   # (nt_full,)
+    x_orig   = np.array(raw["x"])     # (nx_orig,)
+    y_orig   = np.array(raw["y"])     # (ny_orig,)
 
-    sel = slice(None, None, stride)
+    nx_orig = x_orig.shape[0]
+    ny_orig = y_orig.shape[0]
+
+    # Compute spatial downsample stride so that the grid becomes spatial_res × spatial_res
+    sp_stride = max(1, nx_orig // spatial_res)
+    nx_ds = nx_orig // sp_stride
+    ny_ds = ny_orig // sp_stride
+    print(f"Spatial downsample: {nx_orig}×{ny_orig} → {nx_ds}×{ny_ds}  (stride={sp_stride})")
+
+    x_ds = x_orig[::sp_stride]   # (nx_ds,)
+    y_ds = y_orig[::sp_stride]   # (ny_ds,)
+
+    # Load and downsample DNS fields in time (time stride) + space (spatial stride)
+    t_sel = slice(None, None, stride)
     sel_fields = {
-        "u":     np.array(raw["u"],     dtype=np.float32)[sel],
-        "v":     np.array(raw["v"],     dtype=np.float32)[sel],
-        "p":     np.array(raw["p"],     dtype=np.float32)[sel],
-        "omega": np.array(raw["omega"], dtype=np.float32)[sel],
+        "u":     np.array(raw["u"],     dtype=np.float32)[t_sel, ::sp_stride, ::sp_stride],
+        "v":     np.array(raw["v"],     dtype=np.float32)[t_sel, ::sp_stride, ::sp_stride],
+        "p":     np.array(raw["p"],     dtype=np.float32)[t_sel, ::sp_stride, ::sp_stride],
+        "omega": np.array(raw["omega"], dtype=np.float32)[t_sel, ::sp_stride, ::sp_stride],
     }
-    time_sel = time_all[sel]
-    nt  = sel_fields["u"].shape[0]
-    nx  = sel_fields["u"].shape[1]
-    ny  = sel_fields["u"].shape[2]
-    n_spatial = nx * ny
+    time_sel  = time_all[t_sel]
+    nt        = sel_fields["u"].shape[0]
+    n_spatial = nx_ds * ny_ds
     n_rows    = N_FEATURES * nt
 
     print(f"Snapshot matrix: ({n_rows}, {n_spatial})  "
-          f"[{n_rows * n_spatial * 4 / 1e9:.1f} GB if materialised]")
+          f"[{n_rows * n_spatial * 4 / 1e6:.0f} MB]")
 
     # ── Stage A: build A → Gram matrix → free A → get V_k ───────────────────
     print("Stage A: building snapshot matrix ...")
@@ -165,18 +185,24 @@ def main() -> None:
     _, _, piv = qr(U_k.T.astype(np.float64), pivoting=True)
     del U_k
 
-    sensor_flat_idx = np.sort(piv[:K])
-    ix = (sensor_flat_idx // ny).astype(int)
-    iy = (sensor_flat_idx % ny).astype(int)
-    coords_xy = np.stack([x_coords[ix], y_coords[iy]], axis=1)  # (K, 2)
+    # Sensor positions on the downsampled grid
+    sensor_flat_ds = np.sort(piv[:K])
+    ix_ds = (sensor_flat_ds // ny_ds).astype(int)
+    iy_ds = (sensor_flat_ds % ny_ds).astype(int)
 
+    # Map back to original full-resolution grid indices
+    ix_orig_sel = ix_ds * sp_stride
+    iy_orig_sel = iy_ds * sp_stride
+    sensor_flat_orig = ix_orig_sel * ny_orig + iy_orig_sel
+
+    coords_xy = np.stack([x_orig[ix_orig_sel], y_orig[iy_orig_sel]], axis=1)  # (K, 2)
     print(f"Sensor x ∈ [{coords_xy[:, 0].min():.4f}, {coords_xy[:, 0].max():.4f}]")
     print(f"Sensor y ∈ [{coords_xy[:, 1].min():.4f}, {coords_xy[:, 1].max():.4f}]")
 
     # ── Save outputs ─────────────────────────────────────────────────────────
-    t0_str = f"{time_sel[0]:.0f}"
-    t1_str = f"{time_sel[-1]:.0f}"
-    res_str = f"N{nx}"
+    t0_str    = f"{time_sel[0]:.0f}"
+    t1_str    = f"{time_sel[-1]:.0f}"
+    res_str   = f"N{nx_orig}"
     base_name = f"sensors_qrpivot_K{K}_{res_str}_t{t0_str}-{t1_str}"
     npz_name  = base_name + "_dns_values.npz"
     json_name = base_name + ".json"
@@ -185,14 +211,16 @@ def main() -> None:
 
     json_payload = {
         "K": K,
-        "resolution": f"{nx}x{ny}",
+        "resolution": f"{nx_orig}x{ny_orig}",
+        "spatial_downsample_res": f"{nx_ds}x{ny_ds}",
+        "spatial_downsample_stride": int(sp_stride),
         "method": "qr_pivoting",
         "features": ["u", "v", "p", "omega", "grad_u_mag", "grad_v_mag"],
         "time_stride": stride,
         "time_range": [float(time_sel[0]), float(time_sel[-1])],
         "time_steps": int(nt),
         "selected_coordinates": coords_xy.tolist(),
-        "indices": sensor_flat_idx.tolist(),
+        "indices": sensor_flat_orig.tolist(),
         "source_file": str(dns_path),
         "dns_values_npz": str(out_dir / npz_name),
     }
@@ -201,7 +229,7 @@ def main() -> None:
         json.dump(json_payload, f, indent=2)
     print(f"Saved: {json_path}")
 
-    # Extract DNS values at sensor locations for all time steps
+    # Extract DNS values at sensor locations for all time steps (full-res DNS)
     print("Extracting sensor values from full DNS ...")
     u_all     = np.array(raw["u"],     dtype=np.float32)
     v_all     = np.array(raw["v"],     dtype=np.float32)
@@ -210,9 +238,9 @@ def main() -> None:
     np.savez(
         out_dir / npz_name,
         time=time_all,
-        u=u_all[:, ix, iy].T,         # (K, nt_full)
-        v=v_all[:, ix, iy].T,
-        omega=omega_all[:, ix, iy].T,
+        u=u_all[:, ix_orig_sel, iy_orig_sel].T,        # (K, nt_full)
+        v=v_all[:, ix_orig_sel, iy_orig_sel].T,
+        omega=omega_all[:, ix_orig_sel, iy_orig_sel].T,
     )
     print(f"Saved: {out_dir / npz_name}")
     print("Done.")
