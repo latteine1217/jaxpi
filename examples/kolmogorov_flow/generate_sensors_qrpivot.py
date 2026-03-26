@@ -108,9 +108,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="QR-pivot optimal sensor placement for Kolmogorov DNS")
     parser.add_argument("--dns",          required=True,  help="Path to DNS .npy file")
     parser.add_argument("--outdir",       required=True,  help="Output directory")
-    parser.add_argument("--K",            type=int, default=100,  help="Number of sensors")
-    parser.add_argument("--time-stride",  type=int, default=2,    help="Time stride (2=every 0.1s for dt=0.05s DNS)")
-    parser.add_argument("--spatial-res",  type=int, default=512,  help="Downsample spatial grid to NxN before QR (default 512)")
+    parser.add_argument("--K",            type=int,   default=100,   help="Number of sensors")
+    parser.add_argument("--time-stride",  type=int,   default=2,     help="Time stride for QR snapshot matrix (2=every 0.1s)")
+    parser.add_argument("--spatial-res",  type=int,   default=512,   help="Downsample spatial grid to NxN before QR")
+    parser.add_argument("--sensor-dt",    type=float, default=None,
+                        help="Temporal resolution of output sensor NPZ (seconds). "
+                             "If finer than DNS dt, values are CubicSpline-interpolated. "
+                             "Default: use DNS native dt (no interpolation).")
     args = parser.parse_args()
 
     dns_path    = Path(args.dns)
@@ -118,6 +122,7 @@ def main() -> None:
     K           = args.K
     stride      = args.time_stride
     spatial_res = args.spatial_res
+    sensor_dt   = args.sensor_dt
 
     print(f"Loading DNS: {dns_path}")
     raw = np.load(dns_path, allow_pickle=True).item()
@@ -229,20 +234,70 @@ def main() -> None:
         json.dump(json_payload, f, indent=2)
     print(f"Saved: {json_path}")
 
-    # Extract DNS values at sensor locations for all time steps (full-res DNS)
+    # Extract DNS values at sensor locations
     print("Extracting sensor values from full DNS ...")
-    u_all     = np.array(raw["u"],     dtype=np.float32)
+    u_all     = np.array(raw["u"],     dtype=np.float32)   # (nt_full, nx, ny)
     v_all     = np.array(raw["v"],     dtype=np.float32)
     omega_all = np.array(raw["omega"], dtype=np.float32)
 
+    # Raw DNS values at sensor positions: (K, nt_full)
+    u_dns     = u_all[:,     ix_orig_sel, iy_orig_sel].T.astype(np.float64)
+    v_dns     = v_all[:,     ix_orig_sel, iy_orig_sel].T.astype(np.float64)
+    omega_dns = omega_all[:, ix_orig_sel, iy_orig_sel].T.astype(np.float64)
+
+    dns_dt = float(time_all[1] - time_all[0])
+
+    if sensor_dt is not None and sensor_dt < dns_dt - 1e-12:
+        # Interpolate to finer time grid using CubicSpline along the time axis.
+        # Why CubicSpline: provides C² continuity and is accurate for smooth signals;
+        # for turbulent fields at individual sensor locations the time series is
+        # smoother than the spatial field because we're tracking a single trajectory.
+        from scipy.interpolate import CubicSpline
+
+        t_fine = np.arange(time_all[0], time_all[-1] + sensor_dt * 0.5, sensor_dt)
+        n_fine = len(t_fine)
+        pts_per_window = round(0.1 / sensor_dt)  # approximate, for reporting
+
+        print(f"Interpolating sensor time series: DNS dt={dns_dt:.4f}s → sensor dt={sensor_dt:.4f}s")
+        print(f"  DNS time points: {len(time_all)}  →  interpolated: {n_fine}")
+        print(f"  ≈ {pts_per_window} sensor time points per 0.1s window")
+
+        # Fit CubicSpline over the full time axis for each sensor (vectorised over K)
+        # CubicSpline expects axis=0 to be the interpolation axis
+        cs_u     = CubicSpline(time_all, u_dns.T,     axis=0)   # (nt_full, K)
+        cs_v     = CubicSpline(time_all, v_dns.T,     axis=0)
+        cs_omega = CubicSpline(time_all, omega_dns.T, axis=0)
+
+        time_out  = t_fine
+        u_out     = cs_u(t_fine).T.astype(np.float32)     # (K, n_fine)
+        v_out     = cs_v(t_fine).T.astype(np.float32)
+        omega_out = cs_omega(t_fine).T.astype(np.float32)
+
+        # Update JSON with interpolation metadata
+        json_payload["sensor_dt"]            = float(sensor_dt)
+        json_payload["sensor_time_points"]   = int(n_fine)
+        json_payload["interpolation_method"] = "CubicSpline"
+    else:
+        # No interpolation: store native DNS time steps
+        time_out  = time_all
+        u_out     = u_dns.astype(np.float32)
+        v_out     = v_dns.astype(np.float32)
+        omega_out = omega_dns.astype(np.float32)
+        json_payload["sensor_dt"]          = float(dns_dt)
+        json_payload["sensor_time_points"] = int(len(time_all))
+
+    # Re-write JSON now that interpolation metadata is known
+    with open(json_path, "w") as f:
+        json.dump(json_payload, f, indent=2)
+
     np.savez(
         out_dir / npz_name,
-        time=time_all,
-        u=u_all[:, ix_orig_sel, iy_orig_sel].T,        # (K, nt_full)
-        v=v_all[:, ix_orig_sel, iy_orig_sel].T,
-        omega=omega_all[:, ix_orig_sel, iy_orig_sel].T,
+        time=time_out,
+        u=u_out,        # (K, n_time_out)
+        v=v_out,
+        omega=omega_out,
     )
-    print(f"Saved: {out_dir / npz_name}")
+    print(f"Saved: {out_dir / npz_name}  (shape: {u_out.shape})")
     print("Done.")
 
 
