@@ -35,7 +35,7 @@ echo "==========================="
 
 nvidia-smi --query-gpu=index,name,"memory.total","memory.used" --format=csv,noheader
 
-./.venv/bin/python3 examples/kolmogorov_flow/train.py \
+srun ./.venv/bin/python3 examples/kolmogorov_flow/main.py \
     --config="${CONFIG}" \
     --workdir="${WORKDIR}"
 
