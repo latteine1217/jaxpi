@@ -11,6 +11,7 @@
 #SBATCH --mem=64G
 
 set -euo pipefail
+source ~/.zshrc 2>/dev/null || true
 cd /home/junyi/jaxpi
 mkdir -p logs
 
@@ -35,7 +36,7 @@ echo "==========================="
 
 nvidia-smi --query-gpu=index,name,"memory.total","memory.used" --format=csv,noheader
 
-srun ./.venv/bin/python3 examples/kolmogorov_flow/main.py \
+srun uv run python examples/kolmogorov_flow/main.py \
     --config="${CONFIG}" \
     --workdir="${WORKDIR}"
 
