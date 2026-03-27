@@ -5,17 +5,13 @@ import jax.numpy as jnp
 def get_config():
     """
     Re=10000, N=256 的 SOAP 訓練 config。
-    數據與模型架構對齊原作者 upstream/pirate 預設設定，優化器保留 SOAP。
-
-    DNS 資料 (kolmogorov_flow_Re10000_256.npy):
-        L=1.0, coords ∈ [0,1]², nu=1e-4
-        body_force = 2 * sin(4πy)（對應 upstream 原始硬編碼）
+    對齊原始作者 soap.py 設定：hidden_dim=384, period=(2π,2π), transfer_learning=False。
     """
     config = ml_collections.ConfigDict()
 
     config.mode = "train"
 
-    config.transfer_learning = True
+    config.transfer_learning = False
     config.transfer_optimizer_state = False
 
     # Weights & Biases
@@ -23,11 +19,11 @@ def get_config():
     wandb.project = "PINN-Kolmogorov_flow"
     wandb.name = "re10k_n256_soap"
     wandb.group = "re10k_training"
-    wandb.tags = ["soap", "kolmogorov", "pure_pinn", "Re10000", "N256", "hidden_dim=256"]
+    wandb.tags = ["soap", "kolmogorov", "pure_pinn", "Re10000", "N256", "hidden_dim=384"]
     wandb.notes = (
-        "Kolmogorov Re=10000, N=256, L=1. "
-        "PirateNet 3 layers hidden_dim=256 tanh, SOAP. "
-        "Aligned with upstream/pirate default architecture."
+        "Kolmogorov Re=10000, N=256. "
+        "PirateNet 3 layers hidden_dim=384 tanh, SOAP. "
+        "Aligned with upstream original soap.py."
     )
     wandb.sweep_id = None
 
@@ -35,13 +31,13 @@ def get_config():
     config.arch = arch = ml_collections.ConfigDict()
     arch.arch_name = "PirateNet"
     arch.num_layers = 3
-    arch.hidden_dim = 256
+    arch.hidden_dim = 384
     arch.out_dim = 3
     arch.activation = "tanh"
     arch.periodicity = ml_collections.ConfigDict(
-        {"period": (1.0, 1.0), "axis": (1, 2), "trainable": (False, False)}
+        {"period": (2 * jnp.pi, 2 * jnp.pi), "axis": (1, 2), "trainable": (False, False)}
     )
-    arch.fourier_emb = ml_collections.ConfigDict({"embed_scale": 2.0, "embed_dim": 256})
+    arch.fourier_emb = ml_collections.ConfigDict({"embed_scale": 2.0, "embed_dim": 384})
     arch.reparam = ml_collections.ConfigDict({"type": "weight_fact", "mean": 1.0, "stddev": 0.1})
     arch.nonlinearity = 0.0
     arch.pi_init = None
@@ -82,7 +78,7 @@ def get_config():
     # Training — 對齊原作者設定
     config.training = training = ml_collections.ConfigDict()
     training.max_steps = 20000
-    training.batch_size_per_device = 4096
+    training.batch_size_per_device = 8192
     training.num_time_windows = 25
 
     # Weighting
