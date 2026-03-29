@@ -16,6 +16,13 @@ uv run python examples/kolmogorov_flow/main.py \
 ```
 
 ```bash
+# 原作者 upstream SOAP baseline（本地相容版）
+uv run python examples/kolmogorov_flow/main.py \
+  --config=examples/kolmogorov_flow/configs/upstream_soap.py \
+  --workdir=./runs/kf_upstream_soap
+```
+
+```bash
 # Stage A: LES prefit（Adam）
 uv run python examples/kolmogorov_flow/main.py \
   --config=examples/kolmogorov_flow/stage_ab/pirate_les_stage1.py \
@@ -46,6 +53,7 @@ python3 examples/kolmogorov_flow/evaluate_checkpoint.py \
 ## 專案重點
 
 - `examples/kolmogorov_flow/`：訓練、評估、資料腳本
+- `examples/kolmogorov_flow/configs/upstream_soap.py`：與原作者 `pirate` branch `soap.py` 對齊的 baseline config
 - `examples/kolmogorov_flow/stage_ab/`：兩階段 LES → sensor 實驗 config（Adam / SOAP）
 - `jaxpi/`：模型與基礎工具
 - `slurm_*.sh`：伺服器提交腳本
