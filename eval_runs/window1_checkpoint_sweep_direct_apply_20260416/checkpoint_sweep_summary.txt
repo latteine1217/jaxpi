@@ -1,0 +1,54 @@
+=== Window Checkpoint Sweep Summary ===
+{
+  "window": 1,
+  "requested_steps": [
+    10000,
+    20000,
+    30000,
+    40000,
+    50000,
+    60000,
+    70000,
+    80000,
+    90000,
+    100000
+  ],
+  "time_index": -1,
+  "plot_stride": 2,
+  "forward_path": "direct_apply_fn",
+  "runs": [
+    {
+      "label": "no_data",
+      "config_path": "/home/junyi/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_window1_ablation.py",
+      "checkpoint_root": "/home/junyi/jaxpi/re1e6_n512_ds4_soap_w1_ablation/ckpt"
+    },
+    {
+      "label": "sensor",
+      "config_path": "/home/junyi/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_ablation.py",
+      "checkpoint_root": "/home/junyi/jaxpi/re1e6_n512_ds4_soap_sensor100_w50_w1_ablation/ckpt"
+    }
+  ]
+}
+
+run              step        u_error        v_error        w_error
+--------------------------------------------------------------------
+no_data         10000   1.805167e-03   1.693111e-03   2.583466e-03
+no_data         20000   1.303826e-03   1.437020e-03   1.319871e-03
+no_data         30000   1.372744e-03   1.220133e-03   1.088192e-03
+no_data         40000   1.072604e-03   1.181921e-03   8.807618e-04
+no_data         50000   1.141463e-03   1.202966e-03   8.218470e-04
+no_data         60000   1.223646e-03   1.110012e-03   7.972292e-04
+no_data         70000   1.145631e-03   1.282462e-03   7.597307e-04
+no_data         80000   1.118223e-03   1.172751e-03   7.619565e-04
+no_data         90000   1.083530e-03   1.107486e-03   7.240397e-04
+no_data        100000   1.077166e-03   1.088496e-03   7.043464e-04
+sensor          10000   1.611865e-03   1.716142e-03   2.649553e-03
+sensor          20000   1.423732e-03   1.355362e-03   1.410681e-03
+sensor          30000   1.133016e-03   1.180314e-03   1.029871e-03
+sensor          40000   1.195103e-03   1.094728e-03   8.770467e-04
+sensor          50000   1.208914e-03   1.153957e-03   8.390927e-04
+sensor          60000   1.077931e-03   1.093845e-03   7.592798e-04
+sensor          70000   1.080680e-03   1.157059e-03   7.267448e-04
+sensor          80000   1.038285e-03   1.052127e-03   7.282852e-04
+sensor          90000   1.047114e-03   1.115390e-03   7.085629e-04
+sensor         100000   1.135520e-03   1.134433e-03   7.110798e-04

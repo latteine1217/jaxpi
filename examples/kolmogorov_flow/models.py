@@ -177,20 +177,18 @@ class NavierStokes(ForwardIVP):
         return chunked_fn
 
     def neural_net(self, params, t, x, y):
+        # What: 單一或批次時空點前向推論，回傳 u, v, p。
+        # Why: 舊版在 z.ndim==1 時加 z[None, :] fake batch 維，在 double vmap
+        #      (time × space) 下會讓 apply_fn 看到 (T, 1, 3) 而非 (T, N, 3)，
+        #      導致 batch-size-dependent 錯誤結果（已由 3265/3271/3272 audit 確認）。
+        #      PirateNet.__call__ 接受任意 (..., 3) shape，直接呼叫即可：
+        #      - scalar 呼叫 (在 vmap 內)：z=(3,) → vmap 向量化後 apply_fn 見 (N, 3) ✓
+        #      - 批次呼叫 (直接傳陣列)：z=(N, 3) → apply_fn 見 (N, 3) ✓
         t = t / self.t_star[-1]
         if jnp.ndim(t) == 0:
             t = jnp.broadcast_to(t, x.shape)
         z = jnp.stack([t, x, y], axis=-1)
-
-        if z.ndim == 1:
-            z_in = z[None, :]
-            _, outputs = self.state.apply_fn(params, z_in)
-            outputs = outputs[0]
-        else:
-            z_in = jnp.reshape(z, (-1, z.shape[-1]))
-            _, outputs = self.state.apply_fn(params, z_in)
-            outputs = jnp.reshape(outputs, z.shape[:-1] + (-1,))
-
+        _, outputs = self.state.apply_fn(params, z)
         u = outputs[..., 0]
         v = outputs[..., 1]
         p = outputs[..., 2]
