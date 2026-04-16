@@ -26,12 +26,18 @@ for p in [ROOT_DIR, EXAMPLE_DIR]:
         sys.path.insert(0, p)
 
 # ── 設定 ────────────────────────────────────────────────────────────────────
-CONFIG_PATH = os.path.join(EXAMPLE_DIR, "configs", "paper_repro_soap_sensor100_w25.py")
+CONFIG_PATH = os.environ.get(
+    "EVAL_CONFIG_PATH",
+    os.path.join(EXAMPLE_DIR, "configs", "paper_repro_soap_sensor100_n512_w25.py"),
+)
 CKPT_ROOT = os.environ.get(
     "EVAL_CKPT_ROOT",
-    os.path.join(ROOT_DIR, "re1e6_n2048_ke024_soap_sensor100_w25", "ckpt"),
+    os.path.join(ROOT_DIR, "re1e6_n512_ds4_soap_sensor100_w25", "ckpt"),
 )
-OUTPUT_DIR = os.path.join(ROOT_DIR, "eval_sensor100_w25")
+OUTPUT_DIR = os.environ.get(
+    "EVAL_OUTPUT_DIR",
+    os.path.join(ROOT_DIR, "eval_sensor100_w25"),
+)
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -80,6 +86,19 @@ def latest_step(ckpt_dir: str):
             except (IndexError, ValueError):
                 pass
     return max(steps) if steps else None
+
+
+def to_window_local_time(t_window: np.ndarray) -> np.ndarray:
+    """
+    What:
+        將單一 time window 的絕對時間轉成以 0 起算的局部時間。
+    Why:
+        此 run 的 checkpoint 是以每個 window 的 local time 定義訓練；
+        若評估時直接餵入 DNS absolute time，`window 2+` 的完整誤差會被
+        系統性放大，無法反映真實 checkpoint 品質。
+    """
+    t_window = np.asarray(t_window)
+    return t_window - float(t_window[0])
 
 
 def compute_energy_spectrum(u2d: np.ndarray, v2d: np.ndarray):
@@ -175,6 +194,7 @@ def main():
             continue
 
         t_win = t_star[si:ei]
+        t_win_local = to_window_local_time(t_win)
         u_ref_win = u_ref[si:ei, :]
         v_ref_win = v_ref[si:ei, :]
         w_ref_win = w_ref[si:ei, :]
@@ -183,7 +203,7 @@ def main():
         v0 = v_ref[si, :]
         w0 = w_ref[si, :]
 
-        model = kf_models.NavierStokes(config, t_win, coords, u0, v0, w0, nu)
+        model = kf_models.NavierStokes(config, t_win_local, coords, u0, v0, w0, nu)
 
         ckpt_dir = os.path.join(CKPT_ROOT, f"time_window_{win}")
         step = latest_step(ckpt_dir)
@@ -199,7 +219,7 @@ def main():
         print(f"  computing full-window L2 error ...", end=" ", flush=True)
         u_err, v_err, w_err = model.compute_l2_error_time_space_chunked(
             model.state.params,
-            t_win,
+            t_win_local,
             coords,
             u_ref_win,
             v_ref_win,
@@ -235,9 +255,10 @@ def main():
         x_c, y_c = coords[:, 0], coords[:, 1]
         for idx_i in sample_idx:
             t_i = float(t_win[idx_i])
-            u_p = pred_chunked(model.u_ic_pred_fn, model.state.params, t_i, x_c, y_c)
-            v_p = pred_chunked(model.v_ic_pred_fn, model.state.params, t_i, x_c, y_c)
-            w_p = pred_chunked(model.w_ic_pred_fn, model.state.params, t_i, x_c, y_c)
+            t_i_local = float(t_win_local[idx_i])
+            u_p = pred_chunked(model.u_ic_pred_fn, model.state.params, t_i_local, x_c, y_c)
+            v_p = pred_chunked(model.v_ic_pred_fn, model.state.params, t_i_local, x_c, y_c)
+            w_p = pred_chunked(model.w_ic_pred_fn, model.state.params, t_i_local, x_c, y_c)
 
             ur = u_ref_win[idx_i, :]
             vr = v_ref_win[idx_i, :]
@@ -256,9 +277,10 @@ def main():
 
         # ── last time-step field + spectrum (only last available window) ───────
         t_last = float(t_win[-1])
-        u_p_last = pred_chunked(model.u_ic_pred_fn, model.state.params, t_last, x_c, y_c)
-        v_p_last = pred_chunked(model.v_ic_pred_fn, model.state.params, t_last, x_c, y_c)
-        w_p_last = pred_chunked(model.w_ic_pred_fn, model.state.params, t_last, x_c, y_c)
+        t_last_local = float(t_win_local[-1])
+        u_p_last = pred_chunked(model.u_ic_pred_fn, model.state.params, t_last_local, x_c, y_c)
+        v_p_last = pred_chunked(model.v_ic_pred_fn, model.state.params, t_last_local, x_c, y_c)
+        w_p_last = pred_chunked(model.w_ic_pred_fn, model.state.params, t_last_local, x_c, y_c)
         w_r_last = np.array(w_ref_win[-1, :])
         u_r_last = np.array(u_ref_win[-1, :])
         v_r_last = np.array(v_ref_win[-1, :])

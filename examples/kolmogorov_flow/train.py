@@ -84,7 +84,19 @@ def _build_sensor_sampler(
     w_values,
     batch_size,
     rng_seed,
+    sampling_mode="random",
+    pad_to_multiple=1,
 ):
+    """
+    What:
+        建立 sensor data sampler，支援隨機抽樣或固定全覆蓋。
+
+    Why:
+        `random` 模式只保證每步看到部分 `(sensor, time)` 點，對 exact sensor fit 夠用，
+        但不足以保證每一步都覆蓋所有 sensor constraints。
+        `all_points` 模式會在每一步固定返回整個 `(sensor × time)` 笛卡兒積，
+        讓 sensor loss 真正覆蓋當前 window 的全部 sensor points。
+    """
     time_values = np.asarray(time_values)
     coords = np.asarray(coords)
     u_values = np.asarray(u_values)
@@ -92,6 +104,41 @@ def _build_sensor_sampler(
     w_values = np.asarray(w_values)
 
     rng = np.random.default_rng(rng_seed)
+
+    if sampling_mode == "all_points":
+        if time_values.ndim != 1:
+            raise ValueError(f"time_values 必須是一維，實際 shape={time_values.shape}")
+        if coords.ndim != 2:
+            raise ValueError(f"coords 必須是二維，實際 shape={coords.shape}")
+
+        num_sensors = coords.shape[0]
+        num_time = time_values.shape[0]
+        if num_sensors == 0 or num_time == 0:
+            raise ValueError("all_points 模式需要非空的 sensor/time 維度")
+
+        time_grid = np.broadcast_to(time_values[None, :], (num_sensors, num_time)).reshape(-1)
+        coords_grid = np.repeat(coords, num_time, axis=0)
+        u_grid = u_values.reshape(-1)
+        v_grid = v_values.reshape(-1)
+        w_grid = w_values.reshape(-1)
+
+        if pad_to_multiple > 1:
+            remainder = time_grid.shape[0] % pad_to_multiple
+            if remainder != 0:
+                pad_count = pad_to_multiple - remainder
+                time_grid = np.concatenate([time_grid, time_grid[:pad_count]], axis=0)
+                coords_grid = np.concatenate([coords_grid, coords_grid[:pad_count]], axis=0)
+                u_grid = np.concatenate([u_grid, u_grid[:pad_count]], axis=0)
+                v_grid = np.concatenate([v_grid, v_grid[:pad_count]], axis=0)
+                w_grid = np.concatenate([w_grid, w_grid[:pad_count]], axis=0)
+
+        def _sample_all_points():
+            return time_grid, coords_grid, u_grid, v_grid, w_grid
+
+        return _sample_all_points
+
+    if sampling_mode != "random":
+        raise ValueError(f"未知 sensor sampling_mode={sampling_mode}")
 
     def _sample():
         time_idx = rng.integers(0, time_values.shape[0], size=batch_size)
@@ -576,6 +623,7 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
     if sensor_batch_per_device is None:
         sensor_batch_per_device = config.training.batch_size_per_device
     sensor_global_batch_size = sensor_batch_per_device * parallel_state["num_devices"]
+    sensor_sampling_mode = str(config.get("sensor_sampling", "random"))
 
     # 接續訓練：從指定 window 開始（預設 0，即從頭訓練）
     # 若 start_window > 0，需從前一個 window 的 ckpt 重建 IC（PINN 預測值，非 DNS 資料）
@@ -583,6 +631,22 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
     if start_window < 0 or start_window >= config.training.num_time_windows:
         raise ValueError(
             f"start_window={start_window} 超出範圍 [0, {config.training.num_time_windows})"
+        )
+    max_windows_to_run = config.training.get("max_windows_to_run", None)
+    if max_windows_to_run is not None:
+        max_windows_to_run = int(max_windows_to_run)
+        if max_windows_to_run < 1:
+            raise ValueError(f"max_windows_to_run={max_windows_to_run} 必須 >= 1")
+        end_window_exclusive = min(
+            config.training.num_time_windows,
+            start_window + max_windows_to_run,
+        )
+    else:
+        end_window_exclusive = config.training.num_time_windows
+    effective_window_count = end_window_exclusive - start_window
+    if effective_window_count < 1:
+        raise ValueError(
+            "本次訓練沒有任何 time window 可執行；請檢查 start_window 與 max_windows_to_run。"
         )
     if start_window > 0:
         logging.info(f"接續訓練：從 window {start_window + 1}/{config.training.num_time_windows} 開始")
@@ -593,7 +657,60 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
         w0 = w_ref[num_time_steps * start_window, :]
         logging.info(f"IC 設定完成（使用 DNS t_idx={num_time_steps * start_window}），準備從 window {start_window + 1} 開始訓練")
 
-    for idx in range(start_window, config.training.num_time_windows):
+    def _predict_next_window_ic(model, current_t_star, current_coords):
+        """
+        What:
+            以目前 window 訓練完成的模型，預測下一個 window 的初始條件。
+        Why:
+            多時間窗口訓練必須把前一窗口末端的 PINN 狀態傳遞到下一窗口；
+            否則後續窗口會一直使用舊初值，破壞 time marching 機制。
+            對高解析度網格（例如 Re=1e6, N=512），渦度預測需要空間導數，
+            必須分塊計算以避免一次對整個空間場做 autodiff 而 OOM。
+        """
+        state = jax.device_get(model.state) if parallel_state["num_devices"] > 1 else model.state
+        params = state.params
+
+        if use_windowed_data:
+            if current_t_star.shape[0] < 2:
+                raise ValueError("windowed_data_dir 模式至少需要 2 個時間點，才能推進下一個 window IC。")
+            dt_next = current_t_star[1] - current_t_star[0]
+            next_ic_time = current_t_star[-1] + dt_next
+        else:
+            next_ic_time = t_star[num_time_steps]
+
+        chunk_size = int(config.logging.get("ic_propagation_chunk_size", config.logging.get("eval_space_chunk_size", 4096)))
+        if chunk_size < 1:
+            chunk_size = 4096
+
+        coords_np = np.asarray(current_coords)
+        next_u0_chunks = []
+        next_v0_chunks = []
+        next_w0_chunks = []
+
+        for start in range(0, coords_np.shape[0], chunk_size):
+            end = min(start + chunk_size, coords_np.shape[0])
+            coords_chunk = coords_np[start:end]
+            x_chunk = jnp.asarray(coords_chunk[:, 0])
+            y_chunk = jnp.asarray(coords_chunk[:, 1])
+
+            next_u0_chunks.append(np.asarray(jax.device_get(model.u_ic_pred_fn(params, next_ic_time, x_chunk, y_chunk))))
+            next_v0_chunks.append(np.asarray(jax.device_get(model.v_ic_pred_fn(params, next_ic_time, x_chunk, y_chunk))))
+            next_w0_chunks.append(np.asarray(jax.device_get(model.w_ic_pred_fn(params, next_ic_time, x_chunk, y_chunk))))
+
+        next_u0 = jnp.asarray(np.concatenate(next_u0_chunks, axis=0))
+        next_v0 = jnp.asarray(np.concatenate(next_v0_chunks, axis=0))
+        next_w0 = jnp.asarray(np.concatenate(next_w0_chunks, axis=0))
+        return next_u0, next_v0, next_w0
+
+    if end_window_exclusive < config.training.num_time_windows:
+        logging.info(
+            "限制訓練窗口數：僅執行 window %d 到 %d（原始總窗口數=%d）",
+            start_window + 1,
+            end_window_exclusive,
+            config.training.num_time_windows,
+        )
+
+    for idx in range(start_window, end_window_exclusive):
         logging.info("Training time window {}".format(idx + 1))
         if use_windowed_data and window_files is not None:
             window_path = str(window_files[idx])
@@ -717,6 +834,8 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
                     sensor_data["w"][:, time_mask],
                     sensor_global_batch_size,
                     rng_seed=config.seed + idx * 10 + 4,
+                    sampling_mode=sensor_sampling_mode,
+                    pad_to_multiple=parallel_state["num_devices"],
                 )
                 samplers["data"] = HostSampler(sensor_sample_fn)
 
@@ -734,6 +853,10 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
             idx,
             parallel_state,
         )
+
+        # 每個 window 結束後，立即把 PINN 預測的邊界狀態傳給下一個 window。
+        if idx < end_window_exclusive - 1:
+            u0, v0, w0 = _predict_next_window_ic(model, t_star, coords)
 
     if jax.process_index() == 0 and config.logging.log_errors:
         if use_windowed_data:
@@ -828,22 +951,8 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
                 "v_error_full": v_error,
                 "w_error_full": w_error,
             },
-            config.training.max_steps * config.training.num_time_windows,
+            config.training.max_steps * effective_window_count,
         )
-
-        #  Update the initial condition for the next time window
-        if config.training.num_time_windows > 1:
-            if parallel_state["num_devices"] > 1:
-                state = jax.device_get(model.state)
-            else:
-                state = model.state
-            params = state.params
-
-            u0 = model.u_ic_pred_fn(params, t_star[num_time_steps], coords[:, 0], coords[:, 1])
-            v0 = model.v_ic_pred_fn(params, t_star[num_time_steps], coords[:, 0], coords[:, 1])
-            w0 = model.w_ic_pred_fn(params, t_star[num_time_steps], coords[:, 0], coords[:, 1])
-
-            del model, state, params
 
 
 def update_config_from_sweep(
@@ -927,7 +1036,12 @@ def _adjust_batch_sizes_for_causal(
 
     # 調整 sensor batch size（如果有設定）
     sensor_batch_per_device = config.get("sensor_batch_size_per_device")
-    if sensor_batch_per_device is not None and sensor_batch_per_device % num_chunks != 0:
+    sensor_sampling_mode = str(config.get("sensor_sampling", "random"))
+    if (
+        sensor_sampling_mode != "all_points"
+        and sensor_batch_per_device is not None
+        and sensor_batch_per_device % num_chunks != 0
+    ):
         old_size = sensor_batch_per_device
         new_size = (sensor_batch_per_device // num_chunks) * num_chunks
         config.sensor_batch_size_per_device = new_size
@@ -976,7 +1090,10 @@ def _validate_batch_size_config(config: ml_collections.ConfigDict, num_devices: 
 
         # 檢查 sensor batch size（如果有）
         sensor_batch_per_device = config.get("sensor_batch_size_per_device")
-        if sensor_batch_per_device is not None:
+        sensor_sampling_mode = str(config.get("sensor_sampling", "random"))
+        if sensor_sampling_mode == "all_points":
+            logging.info("  - sensor_sampling: all_points (sensor_batch_size_per_device ignored)")
+        elif sensor_batch_per_device is not None:
             assert sensor_batch_per_device % num_chunks == 0, (
                 f"Internal error: sensor_batch_size_per_device ({sensor_batch_per_device}) "
                 f"is not divisible by num_chunks ({num_chunks}) after adjustment"

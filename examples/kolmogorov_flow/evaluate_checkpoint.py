@@ -149,6 +149,19 @@ def get_latest_checkpoint_step(ckpt_dir: str) -> Optional[int]:
     return max(steps) if steps else None
 
 
+def to_window_local_time(t_window: np.ndarray) -> np.ndarray:
+    """
+    What:
+        將單一 window 的絕對時間軸轉成以 0 起算的局部時間軸。
+    Why:
+        訓練在非 windowed-data 模式下，所有 time-window 都共用第一個窗口的
+        時間座標定義；若評估直接餵入 DNS 全域絕對時間，會和 checkpoint 的
+        訓練時間座標不一致，導致 `window 2+` 的誤差被系統性放大。
+    """
+    t_window = np.asarray(t_window)
+    return t_window - float(t_window[0])
+
+
 def evaluate_checkpoint(
     config_name: str,
     checkpoint_path: str,
@@ -224,7 +237,9 @@ def evaluate_checkpoint(
         v0 = v_ref[start_idx, :]
         w0 = w_ref[start_idx, :]
 
-        model_t = t_window
+        t_window_local = to_window_local_time(t_window)
+
+        model_t = t_window_local
         model = models.NavierStokes(config, model_t, coords, u0, v0, w0, nu)
 
         ckpt_dir = os.path.join(checkpoint_root, f"time_window_{window_idx}")
@@ -240,14 +255,14 @@ def evaluate_checkpoint(
 
         time_chunk_size, space_chunk_size = resolve_eval_chunk_sizes(
             config.logging,
-            np.asarray(t_window),
+            t_window_local,
         )
 
         if mode == "window":
             print("running full-window L2 error ...")
             u_error, v_error, w_error = model.compute_l2_error_time_space_chunked(
                 model.state.params,
-                t_window,
+                t_window_local,
                 coords,
                 u_ref_window,
                 v_ref_window,
@@ -274,8 +289,9 @@ def evaluate_checkpoint(
         elif mode == "final_step":
             print("running final-step L2 error ...")
             t_final = float(t_window[-1])
+            t_final_local = float(t_window_local[-1])
 
-            t_eval = np.asarray([t_final])
+            t_eval = np.asarray([t_final_local])
             u_ref_final = u_ref_window[-1:, :]
             v_ref_final = v_ref_window[-1:, :]
             w_ref_final = w_ref_window[-1:, :]

@@ -24,3 +24,22 @@ examples/kolmogorov_flow/data/kolmogorov_les/
 
 # Thesis workspace
 thesis/
+
+# Private Claude Code instructions
+CLAUDE.md
+
+# Backup files
+*.bak
+
+# LaTeX build artifacts
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+
+# Web demo assets (large images)
+docs/assets/
+
+# Eval run results (large; only key scalar summaries committed explicitly)
+eval_runs/
+!eval_runs/window1_checkpoint_sweep_direct_apply_20260416/

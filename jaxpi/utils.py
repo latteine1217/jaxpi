@@ -14,6 +14,25 @@ from jax.flatten_util import ravel_pytree
 from flax.training import checkpoints
 
 
+def _resolve_checkpoint_keep(workdir, keep):
+    """What: 將保留策略轉成 Flax 可接受的正整數。
+    Why: 本專案需要支援「保留全部 checkpoint」語意，但 Flax 這版 `keep`
+    必須是整數；因此用「現有 checkpoint 數 + 1」來避免 save 時刪除舊檔。
+    """
+    if keep is not None and keep > 0:
+        return int(keep)
+
+    if not os.path.isdir(workdir):
+        return 1
+
+    checkpoint_entries = [
+        name
+        for name in os.listdir(workdir)
+        if name.startswith("checkpoint_") and name != "checkpoint_tmp"
+    ]
+    return len(checkpoint_entries) + 1
+
+
 def flatten_pytree(pytree):
     return ravel_pytree(pytree)[0]
 
@@ -74,7 +93,14 @@ def save_checkpoint(state, workdir, keep=5, name=None, overwrite=False):
             state = jax.device_get(state)
 
         step = int(state.step)
-        checkpoints.save_checkpoint(workdir, state, step=step, keep=keep, overwrite=overwrite)
+        resolved_keep = _resolve_checkpoint_keep(workdir, keep)
+        checkpoints.save_checkpoint(
+            workdir,
+            state,
+            step=step,
+            keep=resolved_keep,
+            overwrite=overwrite,
+        )
 
 
 def _extract_leaf_sharding(params):

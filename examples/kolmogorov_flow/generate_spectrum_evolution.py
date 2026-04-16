@@ -21,7 +21,27 @@ from examples.kolmogorov_flow.utils import get_dataset
 from examples.kolmogorov_flow import models
 
 
-def compute_energy_spectrum_2d(u, v, nx, ny):
+def infer_domain_lengths(coords, nx, ny):
+    """從扁平 coords 推斷 [0,Lx) × [0,Ly) 的週期域長度。"""
+    x_unique = np.unique(coords[:, 0])
+    y_unique = np.unique(coords[:, 1])
+
+    if len(x_unique) > 1:
+        dx = float(np.median(np.diff(x_unique)))
+        lx = float(x_unique[-1] - x_unique[0] + dx)
+    else:
+        lx = 1.0
+
+    if len(y_unique) > 1:
+        dy = float(np.median(np.diff(y_unique)))
+        ly = float(y_unique[-1] - y_unique[0] + dy)
+    else:
+        ly = 1.0
+
+    return lx, ly
+
+
+def compute_energy_spectrum_2d(u, v, nx, ny, lx=1.0, ly=1.0):
     """
     計算 2D 速度場的能量譜（使用速度場而非渦度）
     
@@ -43,8 +63,8 @@ def compute_energy_spectrum_2d(u, v, nx, ny):
     energy_density = 0.5 * (np.abs(u_fft)**2 + np.abs(v_fft)**2)
     
     # 創建波數網格
-    kx = np.fft.fftshift(np.fft.fftfreq(nx, d=2*np.pi/nx))
-    ky = np.fft.fftshift(np.fft.fftfreq(ny, d=2*np.pi/ny))
+    kx = np.fft.fftshift(np.fft.fftfreq(nx, d=lx / nx))
+    ky = np.fft.fftshift(np.fft.fftfreq(ny, d=ly / ny))
     KX, KY = np.meshgrid(kx, ky, indexing='ij')
     K = np.sqrt(KX**2 + KY**2)
     
@@ -93,7 +113,9 @@ def generate_spectrum_evolution(config_name, checkpoint_path, output_dir, time_i
     # 推斷網格大小
     nx = int(np.sqrt(coords.shape[0]))
     ny = nx
+    lx, ly = infer_domain_lengths(np.asarray(coords), nx, ny)
     print(f"  - 網格大小: {nx} x {ny}")
+    print(f"  - 空間域長度: Lx={lx:.6f}, Ly={ly:.6f}")
     print(f"  - 採樣間隔: {time_interval} 秒")
     print()
     
@@ -183,8 +205,8 @@ def generate_spectrum_evolution(config_name, checkpoint_path, output_dir, time_i
             v_pred_2d = np.array(v_pred).reshape(nx, ny)
             
             # 計算能量譜
-            k_ref, E_ref = compute_energy_spectrum_2d(u_ref_2d, v_ref_2d, nx, ny)
-            k_pred, E_pred = compute_energy_spectrum_2d(u_pred_2d, v_pred_2d, nx, ny)
+            k_ref, E_ref = compute_energy_spectrum_2d(u_ref_2d, v_ref_2d, nx, ny, lx, ly)
+            k_pred, E_pred = compute_energy_spectrum_2d(u_pred_2d, v_pred_2d, nx, ny, lx, ly)
             
             # 存儲結果
             all_times.append(float(t_i))

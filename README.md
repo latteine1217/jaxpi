@@ -1,6 +1,6 @@
 # JAXpi Kolmogorov Flow Branch
 
-本分支聚焦於 Kolmogorov Flow 的 PINN 實驗，目標是用可重現流程比較 PIRATE 與 SOAP 設定。
+本分支聚焦於 Kolmogorov Flow 的 PINN 實驗，目標是用可重現流程比較 PIRATE 與 SOAP 設定，並探索稀疏感測資料對跨窗口場重建的效益。
 
 ## 快速開始
 
@@ -23,86 +23,107 @@ uv run python examples/kolmogorov_flow/main.py \
 ```
 
 ```bash
-# Stage A: LES prefit（Adam）
+# Re=1e6 SOAP 論文復現（paper_repro_soap.py）
 uv run python examples/kolmogorov_flow/main.py \
-  --config=examples/kolmogorov_flow/stage_ab/pirate_les_stage1.py \
-  --workdir=./runs/kf_stage1
+  --config=examples/kolmogorov_flow/configs/paper_repro_soap.py \
+  --workdir=./runs/re1e6_n512_soap
 ```
 
 ```bash
-# Stage A: LES prefit（SOAP）
-uv run python examples/kolmogorov_flow/main.py \
-  --config=examples/kolmogorov_flow/stage_ab/pirate_les_stage1_soap.py \
-  --workdir=./runs/kf_stage1_soap
-```
-
-```bash
-python3 examples/kolmogorov_flow/evaluate_checkpoint.py \
-  --config pirate \
-  --checkpoint_path ./runs/kf_pirate/ckpt
-```
-
-```bash
-# 只評估每窗口最後一步
 python3 examples/kolmogorov_flow/evaluate_checkpoint.py \
   --config soap \
-  --checkpoint_path ./runs/kf_soap/ckpt \
+  --checkpoint_path ./runs/re1e6_n512_soap/ckpt \
   --mode final_step
 ```
 
-## 專案重點
+## 目錄結構
 
-- `examples/kolmogorov_flow/`：訓練、評估、資料腳本
-- `examples/kolmogorov_flow/configs/upstream_soap.py`：與原作者 `pirate` branch `soap.py` 對齊的 baseline config
-- `examples/kolmogorov_flow/stage_ab/`：兩階段 LES → sensor 實驗 config（Adam / SOAP）
-- `jaxpi/`：模型與基礎工具
-- `slurm_*.sh`：伺服器提交腳本
+```
+examples/kolmogorov_flow/
+  configs/             訓練設定（paper_repro / sensor / ablation）
+  data/
+    kolmogorov_dns/    DNS 全場資料（gitignore，需本地存放）
+    kolmogorov_sensors/ QR-pivot 感測點位置與 DNS 對應值
+    paper_dns_ref/     論文對比用參考資料
+  stage_ab/            兩階段 LES → sensor config
+  models.py            NavierStokes PINN 模型（含 bug fix 紀錄）
+  train.py / evaluate_checkpoint.py
+
+jaxpi/                 基礎模型與工具
+slurm/
+  train/               訓練提交腳本
+  eval/                checkpoint 評估腳本
+  postprocess/         後處理與圖像生成腳本
+  lib/common.sh        共用 Slurm 模板函式
+scripts/analysis/      一次性分析腳本
+eval_runs/             已完成評估的結果（關鍵結果納入 Git）
+```
 
 ## 文檔入口
 
-- `INDEX.md`
-- `EXECUTIVE_SUMMARY.md`
-- `EVALUATION_GUIDE.md`
-- `server_setup_guide.md`
+- `INDEX.md` — 實驗分類索引
+- `EXECUTIVE_SUMMARY.md` — 研究摘要
+- `EXPERIMENT_RECORD.md` — 實驗外部狀態帳本（主要追蹤來源）
+- `EVALUATION_GUIDE.md` — 評估流程說明
+- `server_setup_guide.md` — 伺服器環境設定
+
+## 主要 Config 對照
+
+| Config | Re | 感測器 | 說明 |
+| :--- | :--- | :--- | :--- |
+| `upstream_soap.py` | 1e6 | 無 | 與 upstream pirate branch 對齊的 baseline |
+| `paper_repro_soap.py` | 1e6 | 無 | 論文復現主設定（N=512，50 windows） |
+| `paper_repro_soap_sensor100_n512_w50.py` | 1e6 | QR-K100 | sensor 約束版，50 windows |
+| `paper_repro_soap_window1_ablation.py` | 1e6 | 無 | window-1 only，收斂速度對照 |
+| `paper_repro_soap_sensor100_n512_w50_window1_ablation.py` | 1e6 | QR-K100 | window-1 only，sensor A/B 對照 |
+| `re10k_soap.py` | 1e4 | 無 | Re=10000 baseline |
+| `re10k_soap_sensor100.py` | 1e4 | QR-K100 | Re=10000 + sensor |
+
+## Slurm 腳本
+
+訓練腳本（`slurm/train/`）：
+- `train_kolmogorov_paper_repro_soap.sh`
+- `train_kolmogorov_re1e6_sensor100_w25_soap.sh`
+- `train_kolmogorov_re10k_soap.sh`
+- `train_kolmogorov_re10k_sensor100_soap.sh`
+- `train_kolmogorov_upstream_soap.sh`
+
+評估腳本（`slurm/eval/`）：
+- `eval_kolmogorov_paper_repro_soap.sh`
+- `eval_kolmogorov_re1e6_sensor100_w25_soap.sh`
+- `eval_kolmogorov_re10k_n256_soap.sh`
+
+後處理腳本（`slurm/postprocess/`）：
+- `postprocess_kolmogorov_window1_checkpoint_sweep.sh` — window-1 checkpoint sweep
+
+## 分析腳本（scripts/analysis/）
+
+```bash
+# Window-1 checkpoint sweep（no-data vs sensor，direct apply_fn 路徑）
+uv run python scripts/analysis/evaluate_window1_checkpoint_sweep.py \
+  --window 1 \
+  --output-dir eval_runs/my_sweep
+```
+
+```bash
+# Vorticity field 快照比較
+uv run python scripts/analysis/render_vorticity_snapshot_grid.py
+```
 
 ## 近期更新
 
-- `examples/kolmogorov_flow/evaluate_checkpoint.py` 已整合模式切換，使用 `--mode`、`--device` 控制（`auto/gpu`）。
-- 訓練結束的 full-series 誤差評估改為固定 chunk 的 JAX 掃描路徑（降低 host-device 來回）。
-- 一次性分析腳本集中到 `scripts/analysis/`。
-- `thesis/` 視為本地論文工作區，已加入 `.gitignore`，不隨專案原始碼同步到 Git。
-- 新增 `stage_ab` 的 SOAP config：
-  `pirate_les_stage1_soap.py`、`pirate_les_stage1_windowed_soap.py`、`pirate_les_stage2_soap.py`
-- stage1 相關 config 改為較穩定的 LES prefit 預設：
-  `use_causal=False`、停用 `vorticity data loss`、保留 `grad_norm`
-- 訓練與 adaptive weighting 路徑已加上 non-finite guard，避免單次 `nan/inf` 更新污染整個 state
-
-## Stage A/B Configs
-
-- Stage A Adam: `examples/kolmogorov_flow/stage_ab/pirate_les_stage1.py`
-- Stage A Adam (windowed): `examples/kolmogorov_flow/stage_ab/pirate_les_stage1_windowed.py`
-- Stage A SOAP: `examples/kolmogorov_flow/stage_ab/pirate_les_stage1_soap.py`
-- Stage A SOAP (windowed): `examples/kolmogorov_flow/stage_ab/pirate_les_stage1_windowed_soap.py`
-- Stage B Adam: `examples/kolmogorov_flow/stage_ab/pirate_les_stage2.py`
-- Stage B SOAP: `examples/kolmogorov_flow/stage_ab/pirate_les_stage2_soap.py`
-
-## 分析腳本（scripts/analysis）
-
-```bash
-# 時間對齊比較（需提供兩組 checkpoint 根目錄）
-python3 scripts/analysis/time_aligned_comparison.py \
-  --pirate-checkpoint-base ./runs/pirate/ckpt \
-  --soap-checkpoint-base ./runs/soap/ckpt \
-  --output ./runs/time_aligned_comparison.npz
-```
-
-```bash
-# 檢查 DNS 資料並輸出 vorticity GIF
-python3 scripts/analysis/check_dns_data.py \
-  --data-path examples/kolmogorov_flow/data/kolmogorov_dns/kolmogorov_dns_10000.npy
-```
+- **`models.py` bug fix**：移除 `neural_net()` 中 `z[None, :] + outputs[0]` 的 scalar-wrapper 路徑。
+  舊版在 double vmap（time × space）下讓 `apply_fn` 接收 `(T, 1, 3)` 而非 `(T, N, 3)`，
+  導致 batch-size-dependent 錯誤評估結果（3265 audit 確認）。修復後 smoke test PASS。
+- **window-1 checkpoint sweep**（job 3273）：no-data vs sensor 兩組在 window-1 收斂底線均約 `1e-3`、差距 < 6%，
+  說明 sensor 約束對 window-1 本身擬合無顯著效益，效益需從跨窗誤差累積觀察。
+  結果存於 `eval_runs/window1_checkpoint_sweep_direct_apply_20260416/`。
+- `evaluate_window1_checkpoint_sweep.py` 使用 direct `apply_fn` 路徑（batch-invariant），繞開舊 wrapper bug。
+- 新增 QR-pivot 感測點資料：Re=1e3/1e4/1e6，K=100/200，存於 `data/kolmogorov_sensors/`。
+- `slurm/postprocess/postprocess_kolmogorov_window1_checkpoint_sweep.sh` 新增後處理腳本。
 
 ## 備註
 
-- 大型 DNS/LES/checkpoint 資料不應直接納入 Git。
-- 以 `README.md` + `INDEX.md` 為主要維護入口。
+- 大型 DNS/LES/checkpoint 資料不應直接納入 Git（已加入 `.gitignore`）。
+- 評估結果原則上不上傳，除非是關鍵 A/B 對照的 scalar 摘要（`.csv` / `.txt`）或代表性圖像。
+- `EXPERIMENT_RECORD.md` 是唯一追蹤實驗狀態的外部帳本。

@@ -66,6 +66,8 @@ def get_config():
     optim.decay_steps = 2000
     optim.staircase = False
     optim.warmup_steps = 2000
+    # 對齊 upstream schedule_free 路徑：固定搭配 global grad clip = 1.0。
+    optim.grad_clip_norm = 1.0
     optim.grad_accum_steps = 0
     optim.schedule_free = True
 
@@ -112,7 +114,7 @@ def get_config():
     # Saving
     config.saving = saving = ml_collections.ConfigDict()
     saving.save_every_steps = 5000
-    saving.num_keep_ckpts = 2
+    saving.num_keep_ckpts = None
     saving.ckpt_dir = None
     saving.overwrite = True
 

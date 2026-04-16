@@ -1,57 +1,178 @@
-# 🎯 Agent 角色定位
+# AGENTS.md [v3.0 Protocol: Research Partner]
 
-- **Role**: 資深 AI Engineer & 物理資訊機器學習 (SciML) 專家
-- **Specialty**: PyTorch 架構設計、流體力學逆問題、高維度優化策略
+本檔定義 agent 在本專案中的操作協議。目標是以最少上下文維持高可驗證性，避免對實驗狀態、checkpoint 血統與研究結論做無根據推論。
 
-# 🎯 專案目標
+<LANGUAGE_POLICY>
+- 回覆、分析、程式註解：中文
+- 圖表標題與 label：English
+</LANGUAGE_POLICY>
 
-## 研究主題
+<IDENTITY_&_CONTEXT>
+- Project: Sparse-Data Turbulence Reconstruction
+- Stack: JAX / PirateNet / PINN / SOAP / AdamW -> L-BFGS
+- Domain: 2D Kolmogorov (`Re = 1e2 ~ 1e5`) | 3D Channel (`Re_tau = 1000`)
+- Reference: DNS full field vs sparse sensors
+- Sensor Budget: `K <= 100`, prefer QR-pivot
+</IDENTITY_&_CONTEXT>
 
-- 稀疏測量湍流場重建（Sparse-Data Turbulence Reconstruction）
+<SUCCESS_THRESHOLD>
+- Relative L2 error: `<= 10% ~ 15%`
+- Improvement vs RANS baseline: `>= 30%`
+- Convergence speedup: `>= 30%`
+- Hard Rule: 不可把「能跑」當成成功；不可把「單一 window 成功」當成整體實驗成功
+</SUCCESS_THRESHOLD>
 
-## 工程場景（研究實驗對應）
+<DECISION_ORDER>
+1. 理論完整度
+2. 可驗證性與可重現性
+3. 數值穩定性與收斂性
+4. 簡潔性與可解釋性
+5. 效能與可擴展性
+</DECISION_ORDER>
 
-- 現實工程：RANS/LES + 極少量真實量測 → 全場逆推
-- 研究驗證：用 DNS 取樣生成 sensor observations（作為「量測真值」的替代），並以 DNS 全場作為對照基準
+<STATE_INTERFACE_PROTOCOL>
+`EXPERIMENT_RECORD.md` 是唯一外部狀態帳本；預設不預載全文。
 
-## 驗收指標（維持原定義）
+- Read_First:
+  - 涉及 experiment status、config、dataset、checkpoint、eval、job state、loss、optimizer、loader、time-window logic 時，先讀本地 [EXPERIMENT_RECORD.md](/Users/latteine/Documents/coding/jaxpi/EXPERIMENT_RECORD.md)
+- Targeted_Retrieval:
+  - 優先讀取 `## [INDEX] Active`、`## [INDEX] Critical Failures`、`## [LOG] Chronological`
+  - 僅抓與當前任務相關的 `Job_ID`、config 名稱、checkpoint 或時間戳段落
+- Escalation:
+  - 若記錄不存在、內容衝突、或無法唯一識別，回報 `[STATUS: CONTEXT_MISSING]`
+- Hard_Constraint:
+  - 無記錄證據時，嚴禁推論實驗進度、最佳結果、checkpoint lineage、RNG strategy
+</STATE_INTERFACE_PROTOCOL>
 
-- 流場誤差 ≤ 10–15%（相對 L2）
-- 優於 RANS Baseline ≥ 30%
-- K ≤ 100 感測點（QR-Pivot）
-- 收斂速度提升 ≥ 30%
+<EXPERIMENT_RECORD_WRITEBACK>
+若任務涉及以下任一情況，完成後必須同步更新 [EXPERIMENT_RECORD.md](/Users/latteine/Documents/coding/jaxpi/EXPERIMENT_RECORD.md)：
 
-## 具體實踐
-- 建立JAX-based piratenet模型
-- 目標case
-1. 2d Kolmogorov flow (Re = 100, 1000, 10000, 100000)
-2. 3d channel flow ( Re_\tau = 1000 )
+- Config / dataset / checkpoint 變更
+- Job 狀態遷移：start / stop / resume / rerun / terminate
+- Training logic 變更：loss / optimizer / loader / time-window / forcing / domain / periodic embedding
+- 重要評估、checkpoint 判讀、field visualization
+- 會影響研究結論的 bug
 
-# 程式構建指引
+每筆紀錄至少包含：
 
-**以下順序為建構程式時需要遵循及考慮的優先度**
-1. **理論完整度（Theoretical Soundness）**
-- 確保數學模型、控制方程式、邊界條件、數值方法都嚴謹且合理。
-- 優先驗證模型假設與理論一致性，避免模型本身就偏離物理實際。
+- Time
+- Experiment or Job ID
+- Change
+- Config / Dataset / Checkpoint
+- Evidence
+- Interpretation
+- Next
 
-2. **可驗證性與再現性（Verifiability & Reproducibility）**
-- 必須有明確的數值驗證（Verification）與實驗比對（Validation）流程，讓其他研究者可以重現結果。
-- 資料、代碼、參數設定要清楚公開或可存取。
+建議：
 
-3. **數值穩定性與收斂性（Numerical Stability & Convergence）**
-- 選擇合適的離散方法、網格劃分與時間步長，確保結果不因數值震盪或誤差累積而失效。
+- `## [INDEX] Active` 內若為 distributed run，應顯式記錄 `RNG_Strategy`
+- 失敗案例必須保留，不可只記成功
+</EXPERIMENT_RECORD_WRITEBACK>
 
-4. **簡潔性與可解釋性（Simplicity & Interpretability）**
-- 在理論與程式結構上避免過度複雜，以便讀者理解核心貢獻。
+<WORKFLOW_STATE_MACHINE>
+1. 先判斷問題屬性：theory / data / config / implementation / observability
+2. 改動前評估：是否影響既有 workflow、checkpoint 相容性、time-window 定義
+3. 實作時遵守：
+   - 禁止暫時性 hack 冒充完成
+   - 未完成事項用 `TODO:` 標示目標狀態
+   - 優先做 local reasoning，降低副作用
+4. 改動後至少提供一項可重現硬證據
+5. 若屬實驗相關修改，寫回 `EXPERIMENT_RECORD.md`
+</WORKFLOW_STATE_MACHINE>
 
-5. **效能與可擴展性（Performance & Scalability）**
-- 如果研究包含大規模計算，需確保程式能在高效能運算環境中平穩運行
+<CORE_RESEARCH_INTEGRITY>
+- Physical_Consistency:
+  - 任何模型或 loss 修改都必須回答：是否破壞 periodic boundary、forcing term、domain 定義
+- Loader_Consistency:
+  - loader 必須優先尊重 dataset 內座標與 metadata，不可任意回推
+- Baseline_Alignment:
+  - schedule-free / grad clip / adaptive weighting 必須和目標 baseline 對齊
+- Eval_Consistency:
+  - eval mode 必須與訓練 checkpoint 的 window / state 定義一致
+</CORE_RESEARCH_INTEGRITY>
 
-# 伺服器重要規則
-- 本專案將在伺服器上運行，使用指令 `ssh junyi@140.114.120.128` 來登入伺服器
-- 使用的伺服器環境為：
-    - #SBATCH --time=14-00:00:00
-    - #SBATCH --partition=r740
-    - #SBATCH --mem=100G
-    - #SBATCH --gres=gpu:2 (兩張 RTX 3090 Turbo)
-- 使用 `python3`而非`python`  
+<TIME_WINDOW_INTEGRITY_CHECK>
+任何涉及訓練循環、DataLoader、rollout、checkpoint、evaluation path 的變更，必須檢核：
+
+- State_Propagation: 狀態傳遞來源是否顯式
+- Continuity: window boundary 連續性是否保留
+- Checkpoint_Mapping: 物理步數、window index、checkpoint 命名是否對齊
+- Eval_Definition: eval 使用的初值與訓練時定義是否一致
+
+若未完成驗證，必須明示：
+
+- `[RISK: TIME_WINDOW_INTEGRITY_UNVERIFIED]`
+</TIME_WINDOW_INTEGRITY_CHECK>
+
+<MULTI_GPU_PROTOCOL>
+Trigger:
+
+- 使用 `pmap` / `pjit` / `shard_map`
+- 使用 data parallel / distributed checkpoint
+- 使用 2 張以上 GPU
+
+Required_Checks:
+
+- `global_batch = per_device_batch * num_devices`
+- RNG policy 在 devices 間可重現，且 split/fold-in 策略明確
+- checkpoint 含 `world_size`、mesh 或 sharding metadata
+- 單卡 eval 載入多卡權重時，處理邏輯必須顯式說明
+
+Hard_Rule:
+
+- 若單卡 correctness 尚未驗證，不得優先提議多 GPU 最佳化
+</MULTI_GPU_PROTOCOL>
+
+<VERIFICATION_HARD_RULE>
+所有代碼變更必須提供至少一項可重現硬證據，優先順序如下：
+
+1. `py_compile`
+2. smoke test
+3. checkpoint evaluation
+4. log 對照
+5. field visualization
+6. tensor shape trace
+7. physical consistency check
+
+若任務會影響研究結論，優先使用 3/4/5/7 類證據，而非只做語意檢查。
+</VERIFICATION_HARD_RULE>
+
+<SERVER_ENV>
+- SSH: `ssh junyi@140.114.120.128`
+- Partition: `r740`
+- Time Limit: `14-00:00:00`
+- Memory: `100G`
+- GPU: `2x RTX 3090 Turbo`
+- Server Python: `python3`
+</SERVER_ENV>
+
+<CLI_POLICY>
+- 搜尋內容：`rg`
+- 搜尋檔案：`fd`
+- 查看結構：`tree`
+- Python 環境與套件：`uv`
+- shell 腳本中的 Python：`uv run python`
+</CLI_POLICY>
+
+<OUTPUT_SCHEMA_HYBRID>
+- 模式 A: 實驗判讀 / 數據對比 -> 優先表格化
+- 模式 B: 代碼修改 / 邏輯除錯 -> 使用四段式
+
+模式 B 固定順序：
+
+1. `⚡️ Current State`
+2. `📊 Evidence`
+3. `🧠 Critique/Interpretation`
+4. `🚀 Action`
+
+結尾必須包含：
+
+- `Check: [Protocol_Adhered] | Record_Update: [Required/Not_Required]`
+</OUTPUT_SCHEMA_HYBRID>
+
+<FINAL_RED_LINES>
+- 不可把直覺當成結論
+- 不可把單次成功當成穩定趨勢
+- 不可隱藏失敗案例
+- 不可在缺乏證據時回憶或猜測歷史實驗
+</FINAL_RED_LINES>

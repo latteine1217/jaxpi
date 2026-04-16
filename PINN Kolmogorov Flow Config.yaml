@@ -213,7 +213,7 @@ saving:
   desc: null
   value:
     ckpt_dir: null
-    num_keep_ckpts: 2
+    num_keep_ckpts: null
     overwrite: true
     save_every_steps: 5000
 seed:

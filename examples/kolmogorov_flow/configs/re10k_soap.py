@@ -5,29 +5,29 @@ import jax.numpy as jnp
 def get_config():
     """
     Re=10000, N=256 的 SOAP 訓練 config。
-    對齊原始作者 soap.py 設定：hidden_dim=384, period=(2π,2π), transfer_learning=False。
+
+    What:
+        盡量對齊 upstream `examples/kolmogorov_flow/configs/soap.py` 的 SOAP 設定。
+
+    Why:
+        本 branch 的 `re10k` 資料只有 41 個時間點；若完全照 upstream 設成
+        `num_time_windows=25`，每個 window 只剩 1 個時間點，現有 `train.py`
+        會在計算 `dt = t[1] - t[0]` 時失敗。
+        因此此檔僅保留一個必要差異：`training.num_time_windows = 20`。
     """
     config = ml_collections.ConfigDict()
 
     config.mode = "train"
 
     config.transfer_learning = False
-    config.transfer_optimizer_state = False
 
     # Weights & Biases
     config.wandb = wandb = ml_collections.ConfigDict()
     wandb.project = "PINN-Kolmogorov_flow"
-    wandb.name = "re10k_n256_soap"
-    wandb.group = "re10k_training"
-    wandb.tags = ["soap", "kolmogorov", "pure_pinn", "Re10000", "N256", "hidden_dim=384"]
-    wandb.notes = (
-        "Kolmogorov Re=10000, N=256. "
-        "PirateNet 3 layers hidden_dim=384 tanh, SOAP. "
-        "Aligned with upstream original soap.py."
-    )
-    wandb.sweep_id = None
+    wandb.name = "soap_Re10000"
+    wandb.tag = None
 
-    # Arch — 對齊原作者 upstream/pirate 預設
+    # Arch
     config.arch = arch = ml_collections.ConfigDict()
     arch.arch_name = "PirateNet"
     arch.num_layers = 3
@@ -42,25 +42,15 @@ def get_config():
     arch.nonlinearity = 0.0
     arch.pi_init = None
 
-    # Body force: coords ∈ [0,1]²，對齊 upstream 原始設定 2*sin(4πy)
-    # 公式 A * sin(2π * k * y)，A=2, k=2 → 2*sin(4πy)
-    config.body_force = body_force = ml_collections.ConfigDict()
-    body_force.amplitude = 2.0
-    body_force.wavenumber = 2.0
-
-    # Data
     config.time_fraction = 1.0
-    config.dataset_path = (
-        "examples/kolmogorov_flow/data/kolmogorov_flow_Re10000_256.npy"
-    )
-    config.dns_time_range = None
-    config.dns_time_stride = 1
-    config.sensor_json = None
-    config.sensor_values = None
-    config.sensor_batch_size_per_device = None
-    config.sensor_time_shift = True
 
-    # Optim — 保留 SOAP
+    # Re10k case 仍需顯式指定資料來源；其餘共同超參數盡量與 upstream 對齊。
+    config.dataset_path = (
+        "examples/kolmogorov_flow/data/kolmogorov_dns/"
+        "kolmogorov_dns_fp64_etdrk4_Re10000_N256_T5_dt2p5e4_ds4.npy"
+    )
+
+    # Optim
     config.optim = optim = ml_collections.ConfigDict()
     optim.optimizer = "Soap"
     optim.beta1 = 0.9
@@ -71,15 +61,14 @@ def get_config():
     optim.decay_steps = 2000
     optim.staircase = False
     optim.warmup_steps = 2000
-    optim.grad_clip_norm = 1.0
     optim.grad_accum_steps = 0
-    optim.schedule_free = True
+    optim.schedule_free = False
 
-    # Training — 對齊原作者設定
+    # 與 upstream 唯一保留差異：re10k 資料僅 41 個時間點，必須至少保留 2 steps/window。
     config.training = training = ml_collections.ConfigDict()
     training.max_steps = 20000
     training.batch_size_per_device = 8192
-    training.num_time_windows = 25
+    training.num_time_windows = 20
 
     # Weighting
     config.weighting = weighting = ml_collections.ConfigDict()
@@ -91,6 +80,7 @@ def get_config():
             "ru": 1.0,
             "rv": 1.0,
             "rc": 1.0,
+            # 本 branch 的 loss dict 固定包含 data 項；保留 0.0 以維持相容性。
             "u_data": 0.0,
             "v_data": 0.0,
             "w_data": 0.0,
@@ -102,16 +92,10 @@ def get_config():
     weighting.causal_tol = 1.0
     weighting.num_chunks = 16
 
-    # Memory
-    config.optimization = optimization = ml_collections.ConfigDict()
-    optimization.use_vmap_chunking = False
-    optimization.vmap_chunk_size = 512
-    optimization.use_eval_checkpoint = False
-
     # Logging
     config.logging = logging = ml_collections.ConfigDict()
     logging.log_every_steps = 100
-    logging.log_errors = False
+    logging.log_errors = True
     logging.log_losses = True
     logging.log_weights = True
     logging.log_lr = False
@@ -120,20 +104,13 @@ def get_config():
     logging.log_ntk = False
     logging.log_nonlinearities = False
     logging.log_cossim = False
-    logging.eval_time_samples = 8
-    logging.eval_space_samples = 4096
-    logging.eval_time_chunk_seconds = 1.0
-    logging.eval_space_chunk_size = 4096
 
     # Saving
     config.saving = saving = ml_collections.ConfigDict()
     saving.save_every_steps = 5000
-    saving.num_keep_ckpts = 2
-    saving.ckpt_dir = None
-    saving.overwrite = True
+    saving.num_keep_ckpts = None
 
     config.input_dim = 3
     config.seed = 42
-    config.start_window = 0
 
     return config

@@ -16,7 +16,7 @@ def get_config():
     # Weights & Biases
     config.wandb = wandb = ml_collections.ConfigDict()
     wandb.project = "PINN-Kolmogorov_flow"
-    wandb.name = "re1e6_n2048_ke024_soap"
+    wandb.name = "re1e6_n512_ds4_soap"
     wandb.group = "re1e6_training"
     wandb.tags = [
         "soap",
@@ -24,13 +24,14 @@ def get_config():
         "pure_pinn",
         "no_data_constraint",
         "Re1e6",
-        "N2048",
+        "N512",
+        "ds4",
         "hidden_dim=768",
     ]
     wandb.notes = (
-        "Pure PINN Kolmogorov Re=1e6, N=2048, T=5, ke024 DNS as reference. "
+        "Pure PINN Kolmogorov Re=1e6, N=512, T=5, ds4 DNS as reference. "
         "PirateNet, 2 residual blocks, hidden_dim=768, swish, SOAP, schedule_free=True. "
-        "DNS validated: energy balance <0.1%, divergence ~1e-15, k^-3 spectrum."
+        "Uses the currently available unit-domain Re=1e6 DNS file for reproduction."
     )
     wandb.sweep_id = None
 
@@ -59,7 +60,7 @@ def get_config():
 
     # Data: pure PINN reproduction, so all data constraints remain disabled.
     config.time_fraction = 1.0
-    config.dataset_path = "examples/kolmogorov_flow/data/kolmogorov_dns/kolmogorov_Re1e6_N2048_T5_ke024.npy"
+    config.dataset_path = "examples/kolmogorov_flow/data/kolmogorov_dns/kolmogorov_Re1e6_N512_T5_ds4.npy"
     config.dns_time_range = None
     config.dns_time_stride = 1
     config.sensor_json = None
@@ -137,7 +138,7 @@ def get_config():
     # Saving
     config.saving = saving = ml_collections.ConfigDict()
     saving.save_every_steps = 10000
-    saving.num_keep_ckpts = 2
+    saving.num_keep_ckpts = None
     saving.ckpt_dir = None
     saving.overwrite = True
 

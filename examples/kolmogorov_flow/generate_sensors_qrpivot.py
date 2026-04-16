@@ -143,12 +143,19 @@ def main() -> None:
     y_ds = y_orig[::sp_stride]   # (ny_ds,)
 
     # Load and downsample DNS fields in time (time stride) + space (spatial stride)
+    # Handle flat (T, N²) format by reshaping to (T, N, N) first.
+    def _load_field(key):
+        f = np.array(raw[key], dtype=np.float32)
+        if f.ndim == 2:
+            f = f.reshape(f.shape[0], nx_orig, ny_orig)
+        return f
+
     t_sel = slice(None, None, stride)
     sel_fields = {
-        "u":     np.array(raw["u"],     dtype=np.float32)[t_sel, ::sp_stride, ::sp_stride],
-        "v":     np.array(raw["v"],     dtype=np.float32)[t_sel, ::sp_stride, ::sp_stride],
-        "p":     np.array(raw["p"],     dtype=np.float32)[t_sel, ::sp_stride, ::sp_stride],
-        "omega": np.array(raw["omega"], dtype=np.float32)[t_sel, ::sp_stride, ::sp_stride],
+        "u":     _load_field("u")[t_sel, ::sp_stride, ::sp_stride],
+        "v":     _load_field("v")[t_sel, ::sp_stride, ::sp_stride],
+        "p":     _load_field("p")[t_sel, ::sp_stride, ::sp_stride],
+        "omega": _load_field("omega")[t_sel, ::sp_stride, ::sp_stride],
     }
     time_sel  = time_all[t_sel]
     nt        = sel_fields["u"].shape[0]
@@ -236,9 +243,13 @@ def main() -> None:
 
     # Extract DNS values at sensor locations
     print("Extracting sensor values from full DNS ...")
-    u_all     = np.array(raw["u"],     dtype=np.float32)   # (nt_full, nx, ny)
+    u_all     = np.array(raw["u"],     dtype=np.float32)
     v_all     = np.array(raw["v"],     dtype=np.float32)
     omega_all = np.array(raw["omega"], dtype=np.float32)
+    if u_all.ndim == 2:
+        u_all     = u_all.reshape(u_all.shape[0], nx_orig, ny_orig)
+        v_all     = v_all.reshape(v_all.shape[0], nx_orig, ny_orig)
+        omega_all = omega_all.reshape(omega_all.shape[0], nx_orig, ny_orig)
 
     # Raw DNS values at sensor positions: (K, nt_full)
     u_dns     = u_all[:,     ix_orig_sel, iy_orig_sel].T.astype(np.float64)

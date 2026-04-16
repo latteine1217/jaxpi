@@ -123,7 +123,7 @@ def get_config():
     # Saving
     config.saving = saving = ml_collections.ConfigDict()
     saving.save_every_steps = 5000
-    saving.num_keep_ckpts = 2
+    saving.num_keep_ckpts = None
     saving.ckpt_dir = None
     saving.overwrite = True
 

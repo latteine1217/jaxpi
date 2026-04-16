@@ -32,7 +32,27 @@ def compute_enstrophy(w):
     return 0.5 * float(jnp.mean(w**2))
 
 
-def compute_velocity_energy_spectrum_2d(u_field, v_field, nx, ny):
+def infer_domain_lengths(coords, nx, ny):
+    """从扁平 coords 推断 [0,Lx) × [0,Ly) 的周期域长度。"""
+    x_unique = np.unique(coords[:, 0])
+    y_unique = np.unique(coords[:, 1])
+
+    if len(x_unique) > 1:
+        dx = float(np.median(np.diff(x_unique)))
+        lx = float(x_unique[-1] - x_unique[0] + dx)
+    else:
+        lx = 1.0
+
+    if len(y_unique) > 1:
+        dy = float(np.median(np.diff(y_unique)))
+        ly = float(y_unique[-1] - y_unique[0] + dy)
+    else:
+        ly = 1.0
+
+    return lx, ly
+
+
+def compute_velocity_energy_spectrum_2d(u_field, v_field, nx, ny, lx=1.0, ly=1.0):
     """计算二维速度场的 kinetic energy spectrum。"""
     u_fft = np.fft.fft2(u_field)
     v_fft = np.fft.fft2(v_field)
@@ -41,8 +61,9 @@ def compute_velocity_energy_spectrum_2d(u_field, v_field, nx, ny):
 
     energy_density = 0.5 * (np.abs(u_fft) ** 2 + np.abs(v_fft) ** 2)
 
-    kx = np.fft.fftshift(np.fft.fftfreq(nx, d=2 * np.pi / nx))
-    ky = np.fft.fftshift(np.fft.fftfreq(ny, d=2 * np.pi / ny))
+    # 在 [0, L) 周期域上，fftfreq 的 d 应该使用实际网格间距 L / N。
+    kx = np.fft.fftshift(np.fft.fftfreq(nx, d=lx / nx))
+    ky = np.fft.fftshift(np.fft.fftfreq(ny, d=ly / ny))
     KX, KY = np.meshgrid(kx, ky, indexing='ij')
     K = np.sqrt(KX**2 + KY**2)
 
@@ -97,7 +118,9 @@ def evaluate_and_compare(config_name, checkpoint_path, output_dir, time_interval
     # 推断网格大小
     nx = int(np.sqrt(coords.shape[0]))
     ny = nx
+    lx, ly = infer_domain_lengths(np.asarray(coords), nx, ny)
     print(f"  - 网格大小: {nx} x {ny}")
+    print(f"  - 空间域长度: Lx={lx:.6f}, Ly={ly:.6f}")
     print(f"  - 采样间隔: {time_interval} 秒")
     print()
     
@@ -226,8 +249,12 @@ def evaluate_and_compare(config_name, checkpoint_path, output_dir, time_interval
                 u_pred_2d = np.array(u_pred).reshape(nx, ny)
                 v_pred_2d = np.array(v_pred).reshape(nx, ny)
 
-                k_ref, E_ref = compute_velocity_energy_spectrum_2d(u_ref_2d, v_ref_2d, nx, ny)
-                k_pred, E_pred = compute_velocity_energy_spectrum_2d(u_pred_2d, v_pred_2d, nx, ny)
+                k_ref, E_ref = compute_velocity_energy_spectrum_2d(
+                    u_ref_2d, v_ref_2d, nx, ny, lx, ly
+                )
+                k_pred, E_pred = compute_velocity_energy_spectrum_2d(
+                    u_pred_2d, v_pred_2d, nx, ny, lx, ly
+                )
                 
                 last_spectrum_k = k_ref
                 last_spectrum_ref = E_ref

@@ -82,6 +82,19 @@ def latest_step(ckpt_dir: str):
     return max(steps) if steps else None
 
 
+def to_window_local_time(t_window: np.ndarray) -> np.ndarray:
+    """
+    What:
+        將單一 time window 的絕對時間座標轉成以 0 為起點的局部時間。
+    Why:
+        `paper_repro_soap` 訓練時，所有非 windowed-data 的窗口都共用第一個
+        window 的時間定義；評估若直接使用全域絕對時間，會和 checkpoint 的
+        訓練條件不一致，尤其會扭曲 `window 2+` 的全窗口誤差。
+    """
+    t_window = np.asarray(t_window)
+    return t_window - float(t_window[0])
+
+
 def compute_energy_spectrum(u2d: np.ndarray, v2d: np.ndarray):
     """等向性積分能量譜 E(k)，使用整數 shell。"""
     nx, ny = u2d.shape
@@ -175,6 +188,7 @@ def main():
             continue
 
         t_win = t_star[si:ei]
+        t_win_local = to_window_local_time(t_win)
         u_ref_win = u_ref[si:ei, :]
         v_ref_win = v_ref[si:ei, :]
         w_ref_win = w_ref[si:ei, :]
@@ -183,7 +197,7 @@ def main():
         v0 = v_ref[si, :]
         w0 = w_ref[si, :]
 
-        model = kf_models.NavierStokes(config, t_win, coords, u0, v0, w0, nu)
+        model = kf_models.NavierStokes(config, t_win_local, coords, u0, v0, w0, nu)
 
         ckpt_dir = os.path.join(CKPT_ROOT, f"time_window_{win}")
         step = latest_step(ckpt_dir)
@@ -199,7 +213,7 @@ def main():
         print(f"  computing full-window L2 error ...", end=" ", flush=True)
         u_err, v_err, w_err = model.compute_l2_error_time_space_chunked(
             model.state.params,
-            t_win,
+            t_win_local,
             coords,
             u_ref_win,
             v_ref_win,
@@ -234,16 +248,17 @@ def main():
         print(f"  time-series metrics ({len(sample_idx)} pts) ...", end=" ", flush=True)
         x_c, y_c = coords[:, 0], coords[:, 1]
         for idx_i in sample_idx:
-            t_i = float(t_win[idx_i])
-            u_p = pred_chunked(model.u_ic_pred_fn, model.state.params, t_i, x_c, y_c)
-            v_p = pred_chunked(model.v_ic_pred_fn, model.state.params, t_i, x_c, y_c)
-            w_p = pred_chunked(model.w_ic_pred_fn, model.state.params, t_i, x_c, y_c)
+            t_i_abs = float(t_win[idx_i])
+            t_i_local = float(t_win_local[idx_i])
+            u_p = pred_chunked(model.u_ic_pred_fn, model.state.params, t_i_local, x_c, y_c)
+            v_p = pred_chunked(model.v_ic_pred_fn, model.state.params, t_i_local, x_c, y_c)
+            w_p = pred_chunked(model.w_ic_pred_fn, model.state.params, t_i_local, x_c, y_c)
 
             ur = u_ref_win[idx_i, :]
             vr = v_ref_win[idx_i, :]
             wr = w_ref_win[idx_i, :]
 
-            ts_all.append(t_i)
+            ts_all.append(t_i_abs)
             eu_all.append(float(jnp.linalg.norm(u_p - ur) / jnp.linalg.norm(ur)))
             ev_all.append(float(jnp.linalg.norm(v_p - vr) / jnp.linalg.norm(vr)))
             ew_all.append(float(jnp.linalg.norm(w_p - wr) / jnp.linalg.norm(wr)))
@@ -256,9 +271,10 @@ def main():
 
         # ── last time-step field + spectrum (only last available window) ───────
         t_last = float(t_win[-1])
-        u_p_last = pred_chunked(model.u_ic_pred_fn, model.state.params, t_last, x_c, y_c)
-        v_p_last = pred_chunked(model.v_ic_pred_fn, model.state.params, t_last, x_c, y_c)
-        w_p_last = pred_chunked(model.w_ic_pred_fn, model.state.params, t_last, x_c, y_c)
+        t_last_local = float(t_win_local[-1])
+        u_p_last = pred_chunked(model.u_ic_pred_fn, model.state.params, t_last_local, x_c, y_c)
+        v_p_last = pred_chunked(model.v_ic_pred_fn, model.state.params, t_last_local, x_c, y_c)
+        w_p_last = pred_chunked(model.w_ic_pred_fn, model.state.params, t_last_local, x_c, y_c)
         w_r_last = np.array(w_ref_win[-1, :])
         u_r_last = np.array(u_ref_win[-1, :])
         v_r_last = np.array(v_ref_win[-1, :])

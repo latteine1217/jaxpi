@@ -36,6 +36,21 @@ def _infer_coords_from_config(data: Dict) -> np.ndarray:
     return coords
 
 
+def _infer_coords_from_axes(data: Dict) -> Optional[np.ndarray]:
+    x = data.get("x")
+    y = data.get("y")
+    if x is None or y is None:
+        return None
+
+    x = np.asarray(x, dtype=float).reshape(-1)
+    y = np.asarray(y, dtype=float).reshape(-1)
+    if x.size == 0 or y.size == 0:
+        return None
+
+    x_mesh, y_mesh = np.meshgrid(x, y, indexing="ij")
+    return np.stack([x_mesh.ravel(), y_mesh.ravel()], axis=1)
+
+
 def load_dns_npy(path: str) -> DNSData:
     payload = np.load(path, allow_pickle=True)
     data = payload.item() if hasattr(payload, "item") else payload
@@ -47,6 +62,9 @@ def load_dns_npy(path: str) -> DNSData:
         raise ValueError("DNS 檔案缺少 time/t 欄位")
 
     coords = data.get("coords")
+    if coords is None:
+        # 優先使用檔內顯式提供的 x/y 軸；只有完全缺失時才退回 config 推格點。
+        coords = _infer_coords_from_axes(data)
     if coords is None:
         coords = _infer_coords_from_config(data)
     coords = np.asarray(coords, dtype=float)
