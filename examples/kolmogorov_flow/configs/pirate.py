@@ -128,6 +128,9 @@ def get_config():
     logging.eval_time_chunk_seconds = 1.0
     logging.eval_space_chunk_size = 4096
 
+    config.eval = eval_cfg = ml_collections.ConfigDict()
+    eval_cfg.expected_time_remainder = 1
+
     # Saving
     config.saving = saving = ml_collections.ConfigDict()
     saving.save_every_steps = 10000

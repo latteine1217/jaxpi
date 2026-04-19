@@ -25,6 +25,13 @@ for p in [ROOT_DIR, EXAMPLE_DIR]:
     if p not in sys.path:
         sys.path.insert(0, p)
 
+from examples.kolmogorov_flow.eval_common import (
+    compute_energy_spectrum,
+    infer_domain_lengths,
+    resolve_window_layout_from_config,
+    to_window_local_time,
+)
+
 # ── 設定 ────────────────────────────────────────────────────────────────────
 CONFIG_PATH = os.environ.get(
     "EVAL_CONFIG_PATH",
@@ -88,43 +95,6 @@ def latest_step(ckpt_dir: str):
     return max(steps) if steps else None
 
 
-def to_window_local_time(t_window: np.ndarray) -> np.ndarray:
-    """
-    What:
-        將單一 time window 的絕對時間轉成以 0 起算的局部時間。
-    Why:
-        此 run 的 checkpoint 是以每個 window 的 local time 定義訓練；
-        若評估時直接餵入 DNS absolute time，`window 2+` 的完整誤差會被
-        系統性放大，無法反映真實 checkpoint 品質。
-    """
-    t_window = np.asarray(t_window)
-    return t_window - float(t_window[0])
-
-
-def compute_energy_spectrum(u2d: np.ndarray, v2d: np.ndarray):
-    """等向性積分能量譜 E(k)，使用整數 shell。"""
-    nx, ny = u2d.shape
-    u_fft = np.fft.fftshift(np.fft.fft2(u2d))
-    v_fft = np.fft.fftshift(np.fft.fft2(v2d))
-    E_density = 0.5 * (np.abs(u_fft) ** 2 + np.abs(v_fft) ** 2)
-
-    kx = np.fft.fftshift(np.fft.fftfreq(nx, d=2 * np.pi / nx))
-    ky = np.fft.fftshift(np.fft.fftfreq(ny, d=2 * np.pi / ny))
-    KX, KY = np.meshgrid(kx, ky, indexing="ij")
-    K = np.sqrt(KX**2 + KY**2)
-
-    k_max = int(np.max(K))
-    k_bins = np.arange(1, min(k_max, nx // 2))
-    E_k, k_out = [], []
-    for k_i in k_bins:
-        mask = (K >= k_i - 0.5) & (K < k_i + 0.5)
-        n = np.sum(mask)
-        if n > 0:
-            E_k.append(np.sum(E_density[mask]) / n)
-            k_out.append(k_i)
-    return np.array(k_out), np.array(E_k)
-
-
 # ── 主評估 ──────────────────────────────────────────────────────────────────
 
 
@@ -163,10 +133,14 @@ def main():
     if not time_windows:
         raise RuntimeError(f"No time_window_* directories found under {CKPT_ROOT}")
 
-    num_time_steps = N_t // config.training.num_time_windows
+    layout = resolve_window_layout_from_config(t_star, config)
+    num_time_steps = layout.num_time_steps
+    lx, ly = infer_domain_lengths(coords)
     print(f"\n  num_time_windows (config): {config.training.num_time_windows}")
     print(f"  steps per window         : {num_time_steps}")
+    print(f"  trailing time steps      : {layout.time_remainder}")
     print(f"  windows with checkpoints : {time_windows}")
+    print(f"  domain length            : Lx={lx:.6f}, Ly={ly:.6f}")
 
     # ── 評估 ──────────────────────────────────────────────────────────────────
     print("\n[2/4] Evaluating windows ...")
@@ -304,8 +278,8 @@ def main():
         v2d = v_p_last.reshape(nx, nx)
         ur2d = u_r_last.reshape(nx, nx)
         vr2d = v_r_last.reshape(nx, nx)
-        k, E_pred = compute_energy_spectrum(u2d, v2d)
-        _, E_ref = compute_energy_spectrum(ur2d, vr2d)
+        k, E_pred = compute_energy_spectrum(u2d, v2d, lx=lx, ly=ly)
+        _, E_ref = compute_energy_spectrum(ur2d, vr2d, lx=lx, ly=ly)
         last_w = {"k": k, "E_ref": E_ref, "E_pred": E_pred, "t": t_last}
 
     if not records:

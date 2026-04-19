@@ -17,6 +17,12 @@ from utils import get_dataset
 
 
 def evaluate(config: ml_collections.ConfigDict, workdir: str):
+    raise RuntimeError(
+        "examples/kolmogorov_flow/eval.py 已停用：此舊路徑無法保證 time-window / "
+        "prediction API / dataset 介面對齊。請改用 "
+        "examples/kolmogorov_flow/evaluate_checkpoint.py。"
+    )
+
     u_ref, v_ref, w_ref, t_star, x_star, y_star, nu = get_dataset()
 
     # Remove the last time step

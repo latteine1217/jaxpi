@@ -18,6 +18,11 @@ if ROOT_DIR not in sys.path:
 if EXAMPLE_DIR not in sys.path:
     sys.path.insert(0, EXAMPLE_DIR)
 
+from examples.kolmogorov_flow.eval_common import (
+    resolve_window_layout_from_config,
+    to_window_local_time,
+)
+
 
 def load_config(config_name: str):
     if config_name == "pirate":
@@ -45,9 +50,10 @@ def get_latest_checkpoint_step(ckpt_dir: str) -> Optional[int]:
     return max(steps) if steps else None
 
 
-def find_window_for_time(t_target, t_star, num_windows):
+def find_window_for_time(t_target, t_star, window_layout):
     """找出包含目標時間的時間窗口（1-based）。"""
-    num_steps_per_window = len(t_star) // num_windows
+    num_steps_per_window = window_layout.num_time_steps
+    num_windows = window_layout.num_time_windows
 
     for w in range(1, num_windows + 1):
         start_idx = (w - 1) * num_steps_per_window
@@ -87,22 +93,24 @@ def evaluate_at_time(
     w_ref_all = dns_data["w_ref"]
     nu = dns_data["nu"]
 
-    num_steps_per_window = len(t_star) // config.training.num_time_windows
+    layout = resolve_window_layout_from_config(t_star, config)
+    num_steps_per_window = layout.num_time_steps
     start_idx = (window_idx - 1) * num_steps_per_window
     end_idx = window_idx * num_steps_per_window
 
-    t_window = t_star[start_idx:end_idx]
-    if not (t_window[0] <= t_target <= t_window[-1]):
+    t_window_abs = t_star[start_idx:end_idx]
+    if not (t_window_abs[0] <= t_target <= t_window_abs[-1]):
         raise ValueError(
             f"Target time {t_target:.6f} is outside window {window_idx} "
-            f"range [{t_window[0]:.6f}, {t_window[-1]:.6f}]"
+            f"range [{t_window_abs[0]:.6f}, {t_window_abs[-1]:.6f}]"
         )
+    t_window_local = to_window_local_time(t_window_abs)
 
     u0 = u_ref_all[start_idx, :]
     v0 = v_ref_all[start_idx, :]
     w0 = w_ref_all[start_idx, :]
 
-    model = models.NavierStokes(config, t_window, coords, u0, v0, w0, nu)
+    model = models.NavierStokes(config, t_window_local, coords, u0, v0, w0, nu)
 
     ckpt_dir = os.path.join(checkpoint_base, f"time_window_{window_idx}")
     max_step = get_latest_checkpoint_step(ckpt_dir)
@@ -116,7 +124,7 @@ def evaluate_at_time(
     u_dns = u_ref_all[dns_time_idx : dns_time_idx + 1, :]
     v_dns = v_ref_all[dns_time_idx : dns_time_idx + 1, :]
     w_dns = w_ref_all[dns_time_idx : dns_time_idx + 1, :]
-    t_eval = jnp.asarray([t_actual])
+    t_eval = jnp.asarray([float(t_actual - t_window_abs[0])])
 
     u_error, v_error, w_error = model.compute_l2_error_time_space_chunked(
         model.state.params,
@@ -164,6 +172,9 @@ def generate_time_aligned_comparison(args):
         f"t=[{float(t_star[0]):.6f}, {float(t_star[-1]):.6f}]"
     )
 
+    soap_layout = resolve_window_layout_from_config(t_star, load_config("soap"))
+    pirate_layout = resolve_window_layout_from_config(t_star, load_config("pirate"))
+
     soap_windows = [
         int(d.split("_")[-1])
         for d in os.listdir(args.soap_checkpoint_base)
@@ -174,21 +185,23 @@ def generate_time_aligned_comparison(args):
 
     soap_max_window = args.soap_max_window or max(soap_windows)
 
-    pirate_num_windows = args.pirate_num_windows
-    soap_num_windows = args.soap_num_windows
+    pirate_num_windows = pirate_layout.num_time_windows
+    soap_num_windows = soap_layout.num_time_windows
 
     print(f"SOAP windows to compare: 1..{min(soap_max_window, soap_num_windows)}")
     print(f"PIRATE total windows: {pirate_num_windows}")
+    print(f"SOAP steps/window: {soap_layout.num_time_steps}")
+    print(f"PIRATE steps/window: {pirate_layout.num_time_steps}")
 
     results = []
 
     for soap_w in range(1, min(soap_max_window, soap_num_windows) + 1):
-        soap_end_idx = soap_w * 2 - 1
+        soap_end_idx = soap_w * soap_layout.num_time_steps - 1
         if soap_end_idx >= len(t_star):
             break
         t_soap_end = float(t_star[soap_end_idx])
 
-        pirate_w = find_window_for_time(t_soap_end, t_star, pirate_num_windows)
+        pirate_w = find_window_for_time(t_soap_end, t_star, pirate_layout)
         if pirate_w is None:
             print(f"skip SOAP window {soap_w}: target time out of PIRATE range")
             continue

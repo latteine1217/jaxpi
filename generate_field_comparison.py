@@ -30,6 +30,10 @@ from jax import random
 
 print("載入專案模組...")
 from jaxpi.utils import restore_checkpoint
+from examples.kolmogorov_flow.eval_common import (
+    resolve_window_layout_from_config,
+    to_window_local_time,
+)
 from examples.kolmogorov_flow.utils import get_dataset
 from examples.kolmogorov_flow import models
 
@@ -77,7 +81,8 @@ def generate_field_comparison(config_name, checkpoint_path, time_window, time_st
     print()
 
     # 計算時間窗口
-    num_time_steps = len(t_star) // config.training.num_time_windows
+    layout = resolve_window_layout_from_config(t_star, config)
+    num_time_steps = layout.num_time_steps
     start_idx = (time_window - 1) * num_time_steps
     end_idx = time_window * num_time_steps
 
@@ -101,13 +106,15 @@ def generate_field_comparison(config_name, checkpoint_path, time_window, time_st
 
     # 提取窗口數據
     t_window = t_star[start_idx:end_idx]
+    t_window_local = to_window_local_time(t_window)
     u0 = u_ref[start_idx, :]
     v0 = v_ref[start_idx, :]
     w0 = w_ref[start_idx, :]
+    t_current_local = float(t_window_local[time_step_idx])
 
     # 初始化模型
     print("初始化模型...")
-    model = models.NavierStokes(config, t_window, coords, u0, v0, w0, nu)
+    model = models.NavierStokes(config, t_window_local, coords, u0, v0, w0, nu)
     print("✓ 模型初始化完成")
     print()
 
@@ -143,15 +150,16 @@ def generate_field_comparison(config_name, checkpoint_path, time_window, time_st
         end = min((i + 1) * batch_size, n_points)
         batch_coords = coords[start:end]
 
-        t_array = jnp.full((batch_coords.shape[0],), t_current)
-
         # 預測
-        u_batch = np.array(model.u_pred_fn(model.state.params, t_array,
-                                           batch_coords[:, 0], batch_coords[:, 1]))
-        v_batch = np.array(model.v_pred_fn(model.state.params, t_array,
-                                           batch_coords[:, 0], batch_coords[:, 1]))
-        w_batch = np.array(model.w_pred_fn(model.state.params, t_array,
-                                           batch_coords[:, 0], batch_coords[:, 1]))
+        u_batch = np.array(
+            model.u_ic_pred_fn(model.state.params, t_current_local, batch_coords[:, 0], batch_coords[:, 1])
+        )
+        v_batch = np.array(
+            model.v_ic_pred_fn(model.state.params, t_current_local, batch_coords[:, 0], batch_coords[:, 1])
+        )
+        w_batch = np.array(
+            model.w_ic_pred_fn(model.state.params, t_current_local, batch_coords[:, 0], batch_coords[:, 1])
+        )
 
         u_pred_list.append(u_batch)
         v_pred_list.append(v_batch)

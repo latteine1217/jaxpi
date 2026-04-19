@@ -36,6 +36,14 @@ python3 examples/kolmogorov_flow/evaluate_checkpoint.py \
   --mode final_step
 ```
 
+## 評估紅線
+
+- **只用** [examples/kolmogorov_flow/evaluate_checkpoint.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/evaluate_checkpoint.py) 或已對齊的新 eval driver。舊版 [examples/kolmogorov_flow/eval.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/eval.py) 已封存，避免誤用。
+- 所有 time-window checkpoint 評估都必須使用 **window-local time**。把 `t_star[si:ei]` 的 absolute time 直接餵進模型，會讓 `window 2+` 指標失真。
+- 所有 spectrum / Fourier 圖都必須使用 **dataset 實際 domain length**。當前 `re10k` 與 `re1e6 N512 ds4` DNS 檔的 `config.L = 1.0`，不能再把波數軸硬寫成 `[0, 2π)`。
+- `len(t_star) // num_time_windows` 若有餘數，現在必須由 config 顯式宣告 `config.eval.expected_time_remainder`；禁止評估腳本靜默截掉 trailing time steps。
+- 若 window-1 checkpoint sweep 要做正式比較，優先使用 [scripts/analysis/evaluate_window1_checkpoint_sweep.py](/Users/latteine/Documents/coding/jaxpi/scripts/analysis/evaluate_window1_checkpoint_sweep.py) 的 direct `apply_fn` 路徑，不要回退到 wrapper-based 舊路徑。
+
 ## 目錄結構
 
 ```
@@ -115,6 +123,10 @@ uv run python scripts/analysis/render_vorticity_snapshot_grid.py
 - **`models.py` bug fix**：移除 `neural_net()` 中 `z[None, :] + outputs[0]` 的 scalar-wrapper 路徑。
   舊版在 double vmap（time × space）下讓 `apply_fn` 接收 `(T, 1, 3)` 而非 `(T, N, 3)`，
   導致 batch-size-dependent 錯誤評估結果（3265 audit 確認）。修復後 smoke test PASS。
+- **評估腳本 fail-fast 對齊**：新增 [examples/kolmogorov_flow/eval_common.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/eval_common.py)，
+  統一處理 window-local time、time-window layout、domain-length-aware spectrum，以及 trailing-step 契約檢查。
+- **靜默截尾已禁止**：相關 config 現在顯式宣告 `config.eval.expected_time_remainder = 1`，避免 `41/101` 個時間點資料在評估時被默默少算最後一步。
+- **unit-domain spectrum 修正**：`re10k` / `re1e6 ds4` 的頻譜腳本改為依 dataset 實際 `L=1.0` 推導波數軸，不再假設 `[0, 2π)`。
 - **window-1 checkpoint sweep**（job 3273）：no-data vs sensor 兩組在 window-1 收斂底線均約 `1e-3`、差距 < 6%，
   說明 sensor 約束對 window-1 本身擬合無顯著效益，效益需從跨窗誤差累積觀察。
   結果存於 `eval_runs/window1_checkpoint_sweep_direct_apply_20260416/`。

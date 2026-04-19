@@ -25,6 +25,13 @@ for p in [ROOT_DIR, EXAMPLE_DIR]:
     if p not in sys.path:
         sys.path.insert(0, p)
 
+from examples.kolmogorov_flow.eval_common import (
+    compute_energy_spectrum,
+    infer_domain_lengths,
+    resolve_window_layout_from_config,
+    to_window_local_time,
+)
+
 # ── 設定 ────────────────────────────────────────────────────────────────────
 CONFIG_PATH = os.path.join(EXAMPLE_DIR, "configs", "re10k_soap.py")
 CKPT_ROOT = os.environ.get(
@@ -82,30 +89,6 @@ def latest_step(ckpt_dir: str):
     return max(steps) if steps else None
 
 
-def compute_energy_spectrum(u2d: np.ndarray, v2d: np.ndarray):
-    """等向性積分能量譜 E(k)，使用整數 shell。"""
-    nx, ny = u2d.shape
-    u_fft = np.fft.fftshift(np.fft.fft2(u2d))
-    v_fft = np.fft.fftshift(np.fft.fft2(v2d))
-    E_density = 0.5 * (np.abs(u_fft) ** 2 + np.abs(v_fft) ** 2)
-
-    kx = np.fft.fftshift(np.fft.fftfreq(nx, d=2 * np.pi / nx))
-    ky = np.fft.fftshift(np.fft.fftfreq(ny, d=2 * np.pi / ny))
-    KX, KY = np.meshgrid(kx, ky, indexing="ij")
-    K = np.sqrt(KX**2 + KY**2)
-
-    k_max = int(np.max(K))
-    k_bins = np.arange(1, min(k_max, nx // 2))
-    E_k, k_out = [], []
-    for k_i in k_bins:
-        mask = (K >= k_i - 0.5) & (K < k_i + 0.5)
-        n = np.sum(mask)
-        if n > 0:
-            E_k.append(np.sum(E_density[mask]) / n)
-            k_out.append(k_i)
-    return np.array(k_out), np.array(E_k)
-
-
 # ── 主評估 ──────────────────────────────────────────────────────────────────
 
 
@@ -144,10 +127,14 @@ def main():
     if not time_windows:
         raise RuntimeError(f"No time_window_* directories found under {CKPT_ROOT}")
 
-    num_time_steps = N_t // config.training.num_time_windows
+    layout = resolve_window_layout_from_config(t_star, config)
+    num_time_steps = layout.num_time_steps
+    lx, ly = infer_domain_lengths(coords)
     print(f"\n  num_time_windows (config): {config.training.num_time_windows}")
     print(f"  steps per window         : {num_time_steps}")
+    print(f"  trailing time steps      : {layout.time_remainder}")
     print(f"  windows with checkpoints : {time_windows}")
+    print(f"  domain length            : Lx={lx:.6f}, Ly={ly:.6f}")
 
     # ── 評估 ──────────────────────────────────────────────────────────────────
     print("\n[2/4] Evaluating windows ...")
@@ -175,6 +162,7 @@ def main():
             continue
 
         t_win = t_star[si:ei]
+        t_win_local = to_window_local_time(t_win)
         u_ref_win = u_ref[si:ei, :]
         v_ref_win = v_ref[si:ei, :]
         w_ref_win = w_ref[si:ei, :]
@@ -183,7 +171,7 @@ def main():
         v0 = v_ref[si, :]
         w0 = w_ref[si, :]
 
-        model = kf_models.NavierStokes(config, t_win, coords, u0, v0, w0, nu)
+        model = kf_models.NavierStokes(config, t_win_local, coords, u0, v0, w0, nu)
 
         ckpt_dir = os.path.join(CKPT_ROOT, f"time_window_{win}")
         step = latest_step(ckpt_dir)
@@ -199,7 +187,7 @@ def main():
         print(f"  computing full-window L2 error ...", end=" ", flush=True)
         u_err, v_err, w_err = model.compute_l2_error_time_space_chunked(
             model.state.params,
-            t_win,
+            t_win_local,
             coords,
             u_ref_win,
             v_ref_win,
@@ -234,16 +222,17 @@ def main():
         print(f"  time-series metrics ({len(sample_idx)} pts) ...", end=" ", flush=True)
         x_c, y_c = coords[:, 0], coords[:, 1]
         for idx_i in sample_idx:
-            t_i = float(t_win[idx_i])
-            u_p = pred_chunked(model.u_ic_pred_fn, model.state.params, t_i, x_c, y_c)
-            v_p = pred_chunked(model.v_ic_pred_fn, model.state.params, t_i, x_c, y_c)
-            w_p = pred_chunked(model.w_ic_pred_fn, model.state.params, t_i, x_c, y_c)
+            t_i_abs = float(t_win[idx_i])
+            t_i_local = float(t_win_local[idx_i])
+            u_p = pred_chunked(model.u_ic_pred_fn, model.state.params, t_i_local, x_c, y_c)
+            v_p = pred_chunked(model.v_ic_pred_fn, model.state.params, t_i_local, x_c, y_c)
+            w_p = pred_chunked(model.w_ic_pred_fn, model.state.params, t_i_local, x_c, y_c)
 
             ur = u_ref_win[idx_i, :]
             vr = v_ref_win[idx_i, :]
             wr = w_ref_win[idx_i, :]
 
-            ts_all.append(t_i)
+            ts_all.append(t_i_abs)
             eu_all.append(float(jnp.linalg.norm(u_p - ur) / jnp.linalg.norm(ur)))
             ev_all.append(float(jnp.linalg.norm(v_p - vr) / jnp.linalg.norm(vr)))
             ew_all.append(float(jnp.linalg.norm(w_p - wr) / jnp.linalg.norm(wr)))
@@ -256,9 +245,10 @@ def main():
 
         # ── last time-step field + spectrum (only last available window) ───────
         t_last = float(t_win[-1])
-        u_p_last = pred_chunked(model.u_ic_pred_fn, model.state.params, t_last, x_c, y_c)
-        v_p_last = pred_chunked(model.v_ic_pred_fn, model.state.params, t_last, x_c, y_c)
-        w_p_last = pred_chunked(model.w_ic_pred_fn, model.state.params, t_last, x_c, y_c)
+        t_last_local = float(t_win_local[-1])
+        u_p_last = pred_chunked(model.u_ic_pred_fn, model.state.params, t_last_local, x_c, y_c)
+        v_p_last = pred_chunked(model.v_ic_pred_fn, model.state.params, t_last_local, x_c, y_c)
+        w_p_last = pred_chunked(model.w_ic_pred_fn, model.state.params, t_last_local, x_c, y_c)
         w_r_last = np.array(w_ref_win[-1, :])
         u_r_last = np.array(u_ref_win[-1, :])
         v_r_last = np.array(v_ref_win[-1, :])
@@ -282,8 +272,8 @@ def main():
         v2d = v_p_last.reshape(nx, nx)
         ur2d = u_r_last.reshape(nx, nx)
         vr2d = v_r_last.reshape(nx, nx)
-        k, E_pred = compute_energy_spectrum(u2d, v2d)
-        _, E_ref = compute_energy_spectrum(ur2d, vr2d)
+        k, E_pred = compute_energy_spectrum(u2d, v2d, lx=lx, ly=ly)
+        _, E_ref = compute_energy_spectrum(ur2d, vr2d, lx=lx, ly=ly)
         last_w = {"k": k, "E_ref": E_ref, "E_pred": E_pred, "t": t_last}
 
     if not records:

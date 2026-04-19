@@ -15,11 +15,26 @@
 
 ## [INDEX] Active Experiments
 
+### `3318` | `kf_w1_data_weight_sweep_1to100_thr5e5`
+
+| Field | Value |
+| :--- | :--- |
+| Status | Running |
+| Config | [paper_repro_soap_window1_ablation.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_window1_ablation.py) |
+| Dataset | [kolmogorov_Re1e6_N512_T5_ds4.npy](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/data/kolmogorov_dns/kolmogorov_Re1e6_N512_T5_ds4.npy) |
+| Sensor Constraint | `QR-pivot K100` |
+| Sweep Range | `data_weight in [1, 100]` (`log=True`) |
+| Objective | fastest `max(ru_loss, rv_loss, rc_loss) < 5e-5` within `50000` steps |
+| Storage | `sqlite:///sweep_w1_data_1to100_thr5e5.db` |
+| Launch Script | `/home/junyi/jaxpi/slurm/sweep/sweep_kf_w1_weights.sh` |
+| Current Risk | `3317` 先以舊 remote 腳本誤啟動（header 仍是 `Threshold: 1e-5`），已在 30 秒內取消並改由 `3318` 重送；`3318` header 已確認吃到正確 `5e-5` threshold 與 `1..100` range 所對應的新版 Python / Slurm 腳本。 |
+| RNG Strategy | Not recorded |
+
 ### `3155` | `re1e6_n512_ds4_soap_sensor100_w50`
 
 | Field | Value |
 | :--- | :--- |
-| Status | Running (resumed after manual evaluation pause) |
+| Status | Paused mainline; Slurm job `3155` 已於 `2026-04-14 21:59 +0800` 結束為 `CANCELLED` |
 | Config | [paper_repro_soap_sensor100_n512_w50.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50.py) |
 | Dataset | [kolmogorov_Re1e6_N512_T5_ds4.npy](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/data/kolmogorov_dns/kolmogorov_Re1e6_N512_T5_ds4.npy) |
 | Sensor Constraint | `QR-pivot K100` + `u_data=100` + `v_data=100` + `w_data=0` |
@@ -52,6 +67,7 @@
   - `ru_loss = 6.300e-07`
   - `rv_loss = 6.651e-07`
 - 最新人工操作已將 `3155` 暫停在 Slurm `STOPPED` 狀態，避免訓練繼續推進而先完成 corrected evaluation。
+- `2026-04-19` 重新查核 Slurm accounting 後，確認 `3155` 最終狀態不是持續 `STOPPED`，而是已在 `2026-04-14 21:59 +0800` 轉為 `CANCELLED`（`Elapsed=5-18:34:34`, `Node=acmt20`）；目前無對應中的 active Slurm allocation。
 - 暫停時的已落盤進度：
   - `time_window_13/checkpoint_100000 -> 2026-04-12 14:20 +0800`
   - `time_window_14/checkpoint_10000  -> 2026-04-12 15:00 +0800`
@@ -251,7 +267,245 @@
 - 同一批腳本又只把每個 window 最後一張 vorticity 畫出來，因此會出現「末張看起來很像，但 full-window `w_err` 很大」的表象落差。
 - 在修正後的 full-window 重跑完成前，`3144` 的 `window 2+` 誤差應視為可疑證據，而非最終結論。
 
+### 評估腳本必須顯式宣告 trailing steps 與 domain-length spectral axis
+
+- 多個 Kolmogorov DNS 檔目前是 `41` 或 `101` 個時間點，搭配 `20 / 25 / 50` windows 時都會留下 `remainder = 1`。
+- `train.py` 與多支評估腳本原本都直接做 `len(t_star) // num_time_windows`，這會默默丟掉最後一個時間點；若不明示，之後很難判斷是刻意沿用訓練切法，還是 eval 自己切錯。
+- 多支 eval driver 又把 FFT 波數軸寫死成 `fftfreq(..., d=2π/N)`；但目前 `re10k` 與 `re1e6 N512 ds4` DNS 檔的 `config.L` 都是 `1.0`，這會直接造成 Fourier axis misalignment。
+- 2026-04-20 已把這兩類假設集中到共用 helper，並要求 config 顯式宣告 `expected_time_remainder`，否則 eval 直接 fail-fast。
+
 ## [LOG] Chronological
+
+### [2026-04-20] eval audit | fail-fast window layout + unit-domain Fourier axis alignment
+
+- Time: `2026-04-20 00:00 +0800`
+- Status: Local eval infrastructure updated and verified
+- Experiment or Job ID: `N/A` (`eval_audit_20260420`)
+
+Change:
+
+- 新增共用 helper [eval_common.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/eval_common.py)，集中處理：
+  - `to_window_local_time()`
+  - `resolve_window_layout()` / `resolve_window_layout_from_config()`
+  - `infer_domain_lengths()`
+  - `compute_energy_spectrum()`
+- 將以下主評估入口改為共用同一套 fail-fast 規則：
+  - [eval_paper_repro_soap.py](/Users/latteine/Documents/coding/jaxpi/eval_paper_repro_soap.py)
+  - [eval_sensor100_w25.py](/Users/latteine/Documents/coding/jaxpi/eval_sensor100_w25.py)
+  - [eval_re10k_n256_soap.py](/Users/latteine/Documents/coding/jaxpi/eval_re10k_n256_soap.py)
+  - [eval_re10k_sensor100.py](/Users/latteine/Documents/coding/jaxpi/eval_re10k_sensor100.py)
+  - [evaluate_checkpoint.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/evaluate_checkpoint.py)
+- 另外修正兩支 comparison artifact 腳本的 time-axis 對齊：
+  - [generate_comparison_plots.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/generate_comparison_plots.py)
+  - [generate_spectrum_evolution.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/generate_spectrum_evolution.py)
+- 另外修正兩支 field comparison / snapshot 腳本的 local-time 對齊：
+  - [generate_field_comparison.py](/Users/latteine/Documents/coding/jaxpi/generate_field_comparison.py)
+  - [generate_field_snapshots.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/generate_field_snapshots.py)
+- 修正 [time_aligned_comparison.py](/Users/latteine/Documents/coding/jaxpi/scripts/analysis/time_aligned_comparison.py) 的硬編碼錯誤：原本把 SOAP 每窗步數直接寫成 `2`，現改為從 config/dataset 解析。
+- 封存危險舊入口 [eval.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/eval.py)：現在會直接報錯，要求改用 `evaluate_checkpoint.py`。
+- 在相關 config 顯式加入 `config.eval.expected_time_remainder = 1`，避免 `41/101` 個時間點的資料在 eval 時被靜默截尾：
+  - [re10k_soap.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/re10k_soap.py)
+  - [re10k_soap_sensor100.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/re10k_soap_sensor100.py)
+  - [paper_repro_soap.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap.py)
+  - [paper_repro_soap_sensor100_n512_w25.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w25.py)
+  - [paper_repro_soap_sensor100_n512_w50.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50.py)
+  - [soap.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/soap.py)
+  - [pirate.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/pirate.py)
+
+Config / Dataset / Checkpoint:
+
+- Datasets:
+  - `kolmogorov_dns_fp64_etdrk4_Re10000_N256_T5_dt2p5e4_ds4.npy`
+  - `kolmogorov_Re1e6_N512_T5_ds4.npy`
+- Dataset config evidence:
+  - both files report `config.L = 1.0`
+  - time lengths are `41` and `101`
+- Checkpoint: 無新 checkpoint；本次僅修正 eval / analysis path 的定義與防呆
+
+Evidence:
+
+- RED test:
+  - `./.venv/bin/python -m unittest tests/test_eval_common.py`
+  - 變更前失敗：`ImportError: cannot import name 'eval_common'`
+- GREEN test:
+  - `./.venv/bin/python -m unittest tests/test_eval_common.py` -> `Ran 5 tests ... OK`
+- Syntax verification:
+  - `./.venv/bin/python -m py_compile ...`（包含新 helper、主 eval driver、相關 config）-> PASS
+- Dataset hard evidence:
+  - `./.venv/bin/python` 讀 DNS `.npy`：
+    - `kolmogorov_dns_fp64_etdrk4_Re10000_N256_T5_dt2p5e4_ds4.npy -> config.L=1.0, time len=41`
+    - `kolmogorov_Re1e6_N512_T5_ds4.npy -> config.L=1.0, time len=101`
+- Import smoke:
+  - `eval_paper_repro_soap`, `eval_sensor100_w25`, `eval_re10k_n256_soap`, `eval_re10k_sensor100`, `evaluate_checkpoint`, `time_aligned_comparison` 全部可 import
+  - `generate_comparison_plots` / `generate_spectrum_evolution` 在本機需加 `JAX_PLATFORMS=cpu` 才能通過 import；`py_compile` 已證明語法正確
+
+Interpretation:
+
+- 這次不是新的實驗結果，而是評估基礎設施修補。
+- 已確認至少有兩類會污染研究結論的風險被消除：
+  - `trailing time step` 被靜默截掉
+  - unit-domain DNS 被錯當成 `[0, 2π)` 來畫 spectrum
+- 另外也移除了至少一條危險舊入口（`examples/kolmogorov_flow/eval.py`），避免後續誤用。
+
+Next:
+
+- 若要重跑任何 `re10k` / `re1e6` comparison artifact，應以修正後腳本重新生成，不要混用舊版頻譜圖。
+- 對尚未納入本輪 helper 的歷史可視化腳本（例如單張 field snapshot 類）也應再做一次 local-time audit，避免留下未封口的舊路徑。
+
+### [2026-04-19] `3317 -> 3318` | resubmit corrected `1..100`, `5e-5` window-1 sweep
+
+- Time: `2026-04-19 21:26 +0800`
+- Status: `3317` cancelled; `3318` running
+- Experiment or Job ID: `3317`, `3318`
+
+Change:
+
+- 依人工同意，提交新的 window-1 weight sweep，使用獨立 study / storage：
+  - `STUDY_NAME=kf_w1_data_weight_sweep_1to100_thr5e5`
+  - `STORAGE=sqlite:///sweep_w1_data_1to100_thr5e5.db`
+- 首次提交為 `3317`，但啟動後 stdout header 顯示 remote 仍使用舊版腳本，`Threshold` 還是 `1e-5`。
+- 立即將本地已修改的 [sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/scripts/sweep/sweep_weights_window1.py) 與 [sweep_kf_w1_weights.sh](/Users/latteine/Documents/coding/jaxpi/slurm/sweep/sweep_kf_w1_weights.sh) 同步到 remote。
+- 取消錯版 `3317` 後重新提交 `3318`，確認新 job 吃到正確 threshold 與新 study/storage。
+
+Config / Dataset / Checkpoint:
+
+- Config: [paper_repro_soap_window1_ablation.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_window1_ablation.py)
+- Storage: `sqlite:///sweep_w1_data_1to100_thr5e5.db`
+- Sweep range: `data_weight in [1, 100]` (`log=True`)
+- Objective threshold: `5e-5`
+- Checkpoint: 無；sweep 預設不存 checkpoint
+
+Evidence:
+
+- First submission:
+  - `sbatch -> Submitted batch job 3317`
+  - `sweep_kf_w1_weights_3317.out` header:
+    - `Study    : kf_w1_data_weight_sweep_1to100_thr5e5`
+    - `Threshold: 1e-5`  ← 錯版，證明 remote script 尚未同步
+- Remote sync:
+  - `rsync scripts/sweep/sweep_weights_window1.py ...:/home/junyi/jaxpi/scripts/sweep/sweep_weights_window1.py`
+  - `rsync slurm/sweep/sweep_kf_w1_weights.sh ...:/home/junyi/jaxpi/slurm/sweep/sweep_kf_w1_weights.sh`
+- Corrected submission:
+  - `scancel 3317`
+  - `sbatch -> Submitted batch job 3318`
+  - `squeue -j 3318` -> `RUNNING`
+  - `sweep_kf_w1_weights_3318.out` header:
+    - `Study    : kf_w1_data_weight_sweep_1to100_thr5e5`
+    - `Threshold: 5e-5`
+    - `Storage  : sqlite:///sweep_w1_data_1to100_thr5e5.db`
+    - `target   : max(ru,rv,rc) < 5e-05`
+- Slurm accounting:
+  - `3317 | CANCELLED | Elapsed=00:00:30`
+  - `3318 | RUNNING   | Start=2026-04-19 21:26:17 +0800`
+
+Interpretation:
+
+- `3317` 不可作為正式 sweep 結果引用；它只是暴露出 remote 腳本未同步的提交失敗案例。
+- `3318` 才是本輪正式的 `1..100` / `5e-5` sweep。
+- 目前最重要的是後續觀察 `3318` 早期 trials 是否把 `data_weight=100` 附近保留成最佳區域，或是否在中高權重區間更快穿越 `5e-5`。
+
+Next:
+
+- 持續監看 `3318` 的 trial log，優先抓：
+  - 首個 `finished with value` 的完整 trial
+  - 是否有 trial 在 `50000` steps 內實際達到 `5e-5`
+  - `data_weight=100` 附近是否優於中段權重
+- job 完成後，從新 DB 匯總完整 trial/value/weight 表，不和 `3314` 混表。
+
+### [2026-04-19] sweep logic update | narrow `data_weight` range to `1..100` and relax threshold to `5e-5`
+
+- Time: `2026-04-19 21:30 +0800`
+- Status: Local code updated and verified; no new Slurm job submitted
+- Experiment or Job ID: N/A (pre-run sweep logic change)
+
+Change:
+
+- 依人工指示，將 [sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/scripts/sweep/sweep_weights_window1.py) 的 `data_weight` 搜尋空間從 `0.1..1000`（log scale）收斂成 `1..100`（log scale）。
+- 同時把 objective threshold 的預設值從 `1e-5` 改成 `5e-5`，讓下一輪 sweep 優先回答「`data_weight=100` 是否已接近最佳」以及「哪組權重最快跌到 `5e-5`」。
+- 同步更新 [sweep_kf_w1_weights.sh](/Users/latteine/Documents/coding/jaxpi/slurm/sweep/sweep_kf_w1_weights.sh) 的 `THRESHOLD` 預設值，避免 Slurm wrapper 與 Python 腳本預設不一致。
+- 額外抽出 `suggest_data_weight()` 與 `build_arg_parser()`，讓 sweep 搜尋空間與 CLI 預設值可被單元測試直接驗證。
+
+Config / Dataset / Checkpoint:
+
+- Code:
+  - [sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/scripts/sweep/sweep_weights_window1.py)
+  - [sweep_kf_w1_weights.sh](/Users/latteine/Documents/coding/jaxpi/slurm/sweep/sweep_kf_w1_weights.sh)
+  - [test_sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/tests/test_sweep_weights_window1.py)
+- Dataset / checkpoint: 無變更；本次僅改 sweep 邏輯與預設參數
+
+Evidence:
+
+- RED test:
+  - `python3 -m unittest tests/test_sweep_weights_window1.py`
+  - 變更前失敗：`AttributeError: module 'scripts.sweep.sweep_weights_window1' has no attribute 'suggest_data_weight'`
+  - 變更前失敗：`AttributeError: module 'scripts.sweep.sweep_weights_window1' has no attribute 'build_arg_parser'`
+- GREEN test:
+  - `python3 -m unittest tests/test_sweep_weights_window1.py` -> `Ran 2 tests ... OK`
+- Syntax:
+  - `python3 -m py_compile scripts/sweep/sweep_weights_window1.py`
+  - `bash -n slurm/sweep/sweep_kf_w1_weights.sh`
+
+Interpretation:
+
+- 下一次提交的 sweep 將不再把 sampling budget 分散到 `0.1` 以下或 `100` 以上的權重區間，而是集中在使用者關心的 `1..100`。
+- 目標門檻改成 `5e-5` 後，study 的 best-trial 排序會更接近「最快有效下降」而不是全部卡在 `50000` steps 上限。
+- 本次仍未驗證新的最佳權重；目前只完成「下一輪 sweep 會回答正確問題」的邏輯準備。
+
+Next:
+
+- 重新提交新的 window-1 sweep job，建議使用新 study/storage 名稱，避免和舊 `3314` 混在同一個 Optuna DB。
+- 提交後優先觀察 `data_weight=100` 附近 trial 的 threshold crossing step，確認是否真的是上界最好。
+
+### [2026-04-19] `3314` | window-1 `data_weight` Optuna sweep completed
+
+- Time: `2026-04-19 21:14 +0800`
+- Status: COMPLETED (`ExitCode=0:0`)
+- Experiment or Job ID: `3314`
+
+Change:
+
+- 檢查伺服器當前 job 狀態時，確認 Slurm 佇列為空；最新完成 job 為 `3314`。
+- `3314` 執行 [sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/scripts/sweep/sweep_weights_window1.py)，對 `paper_repro_soap_window1_ablation.py` 做 `data_weight` 對數掃描。
+- Sweep 目標是最小化 `steps_to_threshold`，也就是讓 `max(ru_loss, rv_loss, rc_loss) < 1e-5` 所需步數；單一 trial 上限 `50000` steps，使用 `MedianPruner(n_startup_trials=5, n_warmup_steps=5000, interval_steps=500)`。
+
+Config / Dataset / Checkpoint:
+
+- Config: [paper_repro_soap_window1_ablation.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_window1_ablation.py)
+- Storage: `/home/junyi/jaxpi/sweep_w1_data.db`
+- Sensor: `/home/junyi/jaxpi/examples/kolmogorov_flow/data/kolmogorov_sensors/re1000000/sensors_qrpivot_K100_N512_t0-5.json`
+- Checkpoint: 無；此 sweep 關閉 checkpoint 儲存（`config.saving.save_every_steps = None`）
+
+Evidence:
+
+- Slurm accounting:
+  - `3314 | sweep_kf_w1_weights | COMPLETED | Start=2026-04-18 12:59:59 +0800 | End=2026-04-19 17:17:30 +0800 | Elapsed=1-04:17:31 | ExitCode=0:0`
+- Job header / stdout:
+  - `Study = kf_w1_data_weight_sweep`
+  - `Storage = sqlite:///sweep_w1_data.db`
+  - `Max_steps = 50000`
+  - `Threshold = 1e-5`
+  - `Best Trial -> steps_to_threshold = 50000.0, data_weight = 0.3211`
+- Study DB summary:
+  - `COMPLETE = 5 trials`, `PRUNED = 35 trials`
+  - 所有 `COMPLETE` trials 的 objective 都是 `50000.0`，表示在 `50000` steps 內都**沒有**達到 `1e-5` 門檻
+  - 最佳幾個被 prune 的 `data_weight` / reported worst-loss：
+    - `382.418 -> 1.118e-4`
+    - `7.534   -> 4.960e-4`
+    - `36.020  -> 6.263e-4`
+    - `177.134 -> 7.415e-4`
+    - `0.2526  -> 7.605e-4`
+
+Interpretation:
+
+- `3314` 沒有找到任何能在 `window 1`、`50000` steps 內把 `max(ru,rv,rc)` 壓到 `1e-5` 以下的 `data_weight`。
+- `Best Trial = 0` 不代表成功，而只代表「在未被 prune 的 trial 裡最不差」，其 objective 仍然卡在上限 `50000`。
+- 被 prune 的高權重區間（例如 `36`, `177`, `382`）曾經把 reported worst-loss 壓到 `1e-4 ~ 1e-3`，但仍離門檻差約一個數量級以上；目前證據不足以支持「只調 `data_weight` 就能讓 window-1 快速收斂到 `1e-5`」。
+- 因此這次 sweep 的研究結論應是：`window 1` 的 `data_weight` 單參數掃描未解決收斂底線問題，主瓶頸不太像只是 loss weight 選錯。
+
+Next:
+
+- 若要繼續追 `1e-5` 門檻，下一輪不應只重跑同型 sweep；應優先檢查 threshold 是否過嚴、或改 sweep 其他會影響 early-loss floor 的因素（例如 optimizer / schedule / IC 權重組合）。
+- 若目標改為比較「哪組權重能把 window-1 worst-loss 壓得最低」，應調整 objective，避免現在這種「全部 complete trial 都並列 `50000`」而失去排序解析度。
 
 ### [2026-04-16] `3273` | window-1 checkpoint sweep with corrected direct `apply_fn` forward path (no-data vs sensor)
 

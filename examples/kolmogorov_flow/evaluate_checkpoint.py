@@ -26,6 +26,11 @@ if ROOT_DIR not in sys.path:
 if THIS_DIR not in sys.path:
     sys.path.insert(0, THIS_DIR)
 
+from examples.kolmogorov_flow.eval_common import (
+    resolve_window_layout_from_config,
+    to_window_local_time,
+)
+
 
 def configure_device(device: str) -> None:
     """在匯入 JAX 相關模組前設定執行裝置。"""
@@ -149,19 +154,6 @@ def get_latest_checkpoint_step(ckpt_dir: str) -> Optional[int]:
     return max(steps) if steps else None
 
 
-def to_window_local_time(t_window: np.ndarray) -> np.ndarray:
-    """
-    What:
-        將單一 window 的絕對時間軸轉成以 0 起算的局部時間軸。
-    Why:
-        訓練在非 windowed-data 模式下，所有 time-window 都共用第一個窗口的
-        時間座標定義；若評估直接餵入 DNS 全域絕對時間，會和 checkpoint 的
-        訓練時間座標不一致，導致 `window 2+` 的誤差被系統性放大。
-    """
-    t_window = np.asarray(t_window)
-    return t_window - float(t_window[0])
-
-
 def evaluate_checkpoint(
     config_name: str,
     checkpoint_path: str,
@@ -197,7 +189,8 @@ def evaluate_checkpoint(
     print(f"Re: {1 / nu:.0f}")
     print()
 
-    num_time_steps = len(t_star) // config.training.num_time_windows
+    layout = resolve_window_layout_from_config(t_star, config)
+    num_time_steps = layout.num_time_steps
     time_windows = discover_windows(checkpoint_root, time_window_idx)
 
     if not time_windows:
@@ -208,6 +201,7 @@ def evaluate_checkpoint(
     print(f"mode: {mode}")
     print(f"device: {device}")
     print(f"checkpoint_root: {checkpoint_root}")
+    print(f"trailing time steps: {layout.time_remainder}")
     print(f"windows: {time_windows}")
     print()
 

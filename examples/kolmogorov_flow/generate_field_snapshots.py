@@ -16,6 +16,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 sys.path.insert(0, os.path.dirname(__file__))
 
 from jaxpi.utils import restore_checkpoint
+from examples.kolmogorov_flow.eval_common import (
+    resolve_window_layout_from_config,
+    to_window_local_time,
+)
 from examples.kolmogorov_flow.utils import get_dataset
 from examples.kolmogorov_flow import models
 
@@ -33,25 +37,34 @@ def find_closest_time_index(t_star, target_time, window_idx, num_time_steps):
 
 def load_checkpoint_for_time(config, checkpoint_path, t_target, t_star, coords, u_ref, v_ref, w_ref, nu):
     """載入指定時間的checkpoint並返回預測值"""
-    
-    num_time_steps = len(t_star) // config.training.num_time_windows
-    
-    # 找到包含目標時間的窗口
-    window_idx = int(t_target // (t_star[-1] / config.training.num_time_windows)) + 1
-    window_idx = max(1, min(window_idx, config.training.num_time_windows))
+
+    layout = resolve_window_layout_from_config(t_star, config)
+    num_time_steps = layout.num_time_steps
+
+    window_idx = None
+    for candidate in range(1, layout.num_time_windows + 1):
+        start_idx = (candidate - 1) * num_time_steps
+        end_idx = candidate * num_time_steps
+        t_window_candidate = t_star[start_idx:end_idx]
+        if t_window_candidate[0] <= t_target <= t_window_candidate[-1]:
+            window_idx = candidate
+            break
+    if window_idx is None:
+        raise ValueError(f"target time {t_target} 不在任何 time window 範圍內")
     
     # 確定當前窗口的時間範圍
     start_idx = (window_idx - 1) * num_time_steps
     end_idx = window_idx * num_time_steps
     
     t = t_star[start_idx:end_idx]
+    t_local = to_window_local_time(t)
     
     # 初始化模型
     u0 = u_ref[start_idx, :]
     v0 = v_ref[start_idx, :]
     w0 = w_ref[start_idx, :]
     
-    model = models.NavierStokes(config, t, coords, u0, v0, w0, nu)
+    model = models.NavierStokes(config, t_local, coords, u0, v0, w0, nu)
     
     # 載入 checkpoint
     ckpt_dir = os.path.join(checkpoint_path, f'time_window_{window_idx}')
@@ -73,14 +86,15 @@ def load_checkpoint_for_time(config, checkpoint_path, t_target, t_star, coords, 
     
     # 找到最接近目標時間的索引
     actual_idx, actual_time = find_closest_time_index(t_star, t_target, window_idx, num_time_steps)
+    actual_local_time = float(t_local[actual_idx - start_idx])
     
     # 獲取預測值
     x_coords = coords[:, 0]
     y_coords = coords[:, 1]
     
-    u_pred = model.u_ic_pred_fn(model.state.params, actual_time, x_coords, y_coords)
-    v_pred = model.v_ic_pred_fn(model.state.params, actual_time, x_coords, y_coords)
-    w_pred = model.w_ic_pred_fn(model.state.params, actual_time, x_coords, y_coords)
+    u_pred = model.u_ic_pred_fn(model.state.params, actual_local_time, x_coords, y_coords)
+    v_pred = model.v_ic_pred_fn(model.state.params, actual_local_time, x_coords, y_coords)
+    w_pred = model.w_ic_pred_fn(model.state.params, actual_local_time, x_coords, y_coords)
     
     return np.array(u_pred), np.array(v_pred), np.array(w_pred), actual_time
 

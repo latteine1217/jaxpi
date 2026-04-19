@@ -42,6 +42,10 @@ def get_config():
     arch.nonlinearity = 0.0
     arch.pi_init = None
 
+    config.body_force = body_force = ml_collections.ConfigDict()
+    body_force.amplitude = 0.1
+    body_force.wavenumber = 2.0
+
     config.time_fraction = 1.0
 
     # Re10k case 仍需顯式指定資料來源；其餘共同超參數盡量與 upstream 對齊。
@@ -104,6 +108,9 @@ def get_config():
     logging.log_ntk = False
     logging.log_nonlinearities = False
     logging.log_cossim = False
+
+    config.eval = eval_cfg = ml_collections.ConfigDict()
+    eval_cfg.expected_time_remainder = 1
 
     # Saving
     config.saving = saving = ml_collections.ConfigDict()

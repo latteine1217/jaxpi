@@ -19,6 +19,10 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from jaxpi.utils import restore_checkpoint
 from examples.kolmogorov_flow.utils import get_dataset
+from examples.kolmogorov_flow.eval_common import (
+    resolve_window_layout_from_config,
+    to_window_local_time,
+)
 from examples.kolmogorov_flow import models
 
 
@@ -125,7 +129,8 @@ def evaluate_and_compare(config_name, checkpoint_path, output_dir, time_interval
     print()
     
     # 计算时间窗口
-    num_time_steps = len(t_star) // config.training.num_time_windows
+    layout = resolve_window_layout_from_config(t_star, config)
+    num_time_steps = layout.num_time_steps
     
     # 找到所有可用的窗口
     window_dirs = sorted([d for d in os.listdir(checkpoint_path) if d.startswith('time_window_')])
@@ -158,6 +163,7 @@ def evaluate_and_compare(config_name, checkpoint_path, output_dir, time_interval
         end_idx = window_idx * num_time_steps
         
         t = t_star[start_idx:end_idx]
+        t_local = to_window_local_time(t)
         u_ref_window = u_ref[start_idx:end_idx, :]
         v_ref_window = v_ref[start_idx:end_idx, :]
         w_ref_window = w_ref[start_idx:end_idx, :]
@@ -167,7 +173,7 @@ def evaluate_and_compare(config_name, checkpoint_path, output_dir, time_interval
         v0 = v_ref[start_idx, :]
         w0 = w_ref[start_idx, :]
         
-        model = models.NavierStokes(config, t, coords, u0, v0, w0, nu)
+        model = models.NavierStokes(config, t_local, coords, u0, v0, w0, nu)
         
         # 载入 checkpoint
         ckpt_dir = os.path.join(checkpoint_path, f'time_window_{window_idx}')
@@ -200,6 +206,7 @@ def evaluate_and_compare(config_name, checkpoint_path, output_dir, time_interval
         # 计算每个采样时间步的指标
         for idx, i in enumerate(sample_indices):
             t_i = t[i]
+            t_i_local = float(t_local[i])
             
             # 创建时间数组
             t_array = jnp.full((coords.shape[0],), t_i)
@@ -215,9 +222,9 @@ def evaluate_and_compare(config_name, checkpoint_path, output_dir, time_interval
             y_coords = coords[:, 1]
             
             # 使用单个时间点的预测函数
-            u_pred = model.u_ic_pred_fn(model.state.params, t_i, x_coords, y_coords)
-            v_pred = model.v_ic_pred_fn(model.state.params, t_i, x_coords, y_coords)
-            w_pred = model.w_ic_pred_fn(model.state.params, t_i, x_coords, y_coords)
+            u_pred = model.u_ic_pred_fn(model.state.params, t_i_local, x_coords, y_coords)
+            v_pred = model.v_ic_pred_fn(model.state.params, t_i_local, x_coords, y_coords)
+            w_pred = model.w_ic_pred_fn(model.state.params, t_i_local, x_coords, y_coords)
             
             # 计算相对L2误差
             u_error = float(jnp.linalg.norm(u_pred - u_ref_i) / jnp.linalg.norm(u_ref_i))
