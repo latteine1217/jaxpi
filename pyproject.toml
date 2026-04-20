@@ -25,6 +25,7 @@ dependencies = [
     "torch",
     "tabulate",
     "soap-jax @ git+https://github.com/haydn-jones/SOAP_JAX.git",
+    "optuna",
 ]
 
 [project.optional-dependencies]

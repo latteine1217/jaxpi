@@ -156,8 +156,15 @@ def _build_sensor_sampler(
 
 
 def train_one_window(
-    config, workdir, model, samplers, t, coords, u_ref, v_ref, w_ref, idx, parallel_state
+    config, workdir, model, samplers, t, coords, u_ref, v_ref, w_ref, idx, parallel_state,
+    step_callback=None,
 ):
+    """
+    What: 訓練單一 time window。
+    Why:  step_callback 供 Optuna sweep 早停使用：每次 log 時呼叫
+          step_callback(step, log_dict)，回傳 "stop" 則提前結束訓練。
+          預設為 None，不影響既有行為。
+    """
     step_offset = idx * config.training.max_steps
 
     # Logger
@@ -332,8 +339,10 @@ def train_one_window(
             out_shardings=out_shardings,
         )
     else:
-        jit_step = _jit_step
-        jit_update_weights = None
+        # Why: 單卡模式必須顯式 jit，否則 SOAP lax.cond 兩個 branch 無法 operator-fuse，
+        #      導致第一步 XLA 編譯時間爆增（數小時）。Multi-device 路徑已有 jit wrapper。
+        jit_step = jit(_jit_step)
+        jit_update_weights = None  # 單卡 weight update 走 line 383-384 的 eager 路徑
 
     if num_devices > 1:
         mesh_context = mesh
@@ -432,7 +441,8 @@ def train_one_window(
                     # 某些後端可能不支援記憶體統計，靜默失敗
                     pass
 
-                wandb.log(log_dict, step + step_offset)
+                if wandb.run:
+                    wandb.log(log_dict, step + step_offset)
 
                 end_time = time.time()
                 logger.log_iter(
@@ -443,6 +453,11 @@ def train_one_window(
                     max_steps=config.training.max_steps,
                     num_time_windows=config.training.num_time_windows,
                 )
+
+                # Sweep early-stop hook
+                if step_callback is not None:
+                    if step_callback(step, log_dict) == "stop":
+                        return model
 
         # Saving
         if config.saving.save_every_steps is not None:
