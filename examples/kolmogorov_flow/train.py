@@ -1,5 +1,6 @@
 import time
 import os
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 
 from absl import logging
@@ -40,6 +41,27 @@ class HostSampler:
 
     def sample(self):
         return self.sample_fn()
+
+
+class PrefetchHostSampler:
+    """
+    背景執行緒預取下一個 batch，讓 CPU 取樣與 GPU 訓練 overlap。
+
+    What: 在單一 worker thread 上序列地呼叫 wrapped sampler 的 sample()，提前一個 batch。
+    Why: HostSampler 在 CPU 上 numpy 取樣 + reshape 在 main thread 中與 GPU step 同步阻塞。
+         max_workers=1 保證 sample_fn 仍序列化執行 → 底層 numpy RNG 狀態與不 prefetch 的版本
+         以相同順序消耗，輸出值 bit-identical。
+    """
+
+    def __init__(self, host_sampler):
+        self._sampler = host_sampler
+        self._executor = ThreadPoolExecutor(max_workers=1)
+        self._next = self._executor.submit(self._sampler.sample)
+
+    def sample(self):
+        batch = self._next.result()
+        self._next = self._executor.submit(self._sampler.sample)
+        return batch
 
 
 def _build_uniform_sampler(dom, batch_size):
@@ -821,8 +843,10 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
         )
         res_sample_fn = _build_uniform_sampler(dom, global_batch_size)
 
+        # 用 PrefetchHostSampler 包住所有 host-side samplers，與 GPU step overlap。
+        # 底層 numpy RNG 仍由單一 worker thread 序列消耗，輸出值 bit-identical。
         samplers = {
-            "ics": HostSampler(ics_sample_fn),
+            "ics": PrefetchHostSampler(HostSampler(ics_sample_fn)),
             "res": JaxSampler(res_sample_fn, random.PRNGKey(config.seed + idx * 10 + 2)),
         }
 
@@ -836,7 +860,7 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
                 sensor_global_batch_size,
                 rng_seed=config.seed + idx * 10 + 3,
             )
-            samplers["data"] = HostSampler(sensor_sample_fn)
+            samplers["data"] = PrefetchHostSampler(HostSampler(sensor_sample_fn))
         elif sensor_data is not None:
             if use_windowed_data:
                 window_start = t_star[0]
@@ -862,7 +886,7 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
                     sampling_mode=sensor_sampling_mode,
                     pad_to_multiple=parallel_state["num_devices"],
                 )
-                samplers["data"] = HostSampler(sensor_sample_fn)
+                samplers["data"] = PrefetchHostSampler(HostSampler(sensor_sample_fn))
 
         # Training the current time window
         model = train_one_window(
