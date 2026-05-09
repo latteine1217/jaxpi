@@ -458,20 +458,24 @@ def train_one_window(
                 log_dict["time_window"] = idx + 1
 
                 # 記憶體監控：追蹤 GPU 記憶體使用情況
-                try:
-                    for device_idx, device in enumerate(jax.devices()):
-                        memory_stats = device.memory_stats()
-                        if memory_stats:
-                            device_kind = device.device_kind
-                            log_dict[f"memory/{device_kind}_{device_idx}_bytes_in_use_MB"] = (
-                                memory_stats.get("bytes_in_use", 0) / (1024 ** 2)
-                            )
-                            log_dict[f"memory/{device_kind}_{device_idx}_peak_bytes_in_use_MB"] = (
-                                memory_stats.get("peak_bytes_in_use", 0) / (1024 ** 2)
-                            )
-                except Exception as e:
-                    # 某些後端可能不支援記憶體統計，靜默失敗
-                    pass
+                # device.memory_stats() 為同步 host call，會觸發 device fence；
+                # 改為每 10 個 log interval（預設每 1000 步）取樣一次以降低 hot path 阻塞，
+                # 不影響任何訓練計算（純監控資料）。
+                if step % (config.logging.log_every_steps * 10) == 0:
+                    try:
+                        for device_idx, device in enumerate(jax.devices()):
+                            memory_stats = device.memory_stats()
+                            if memory_stats:
+                                device_kind = device.device_kind
+                                log_dict[f"memory/{device_kind}_{device_idx}_bytes_in_use_MB"] = (
+                                    memory_stats.get("bytes_in_use", 0) / (1024 ** 2)
+                                )
+                                log_dict[f"memory/{device_kind}_{device_idx}_peak_bytes_in_use_MB"] = (
+                                    memory_stats.get("peak_bytes_in_use", 0) / (1024 ** 2)
+                                )
+                    except Exception as e:
+                        # 某些後端可能不支援記憶體統計，靜默失敗
+                        pass
 
                 if wandb.run:
                     wandb.log(log_dict, step + step_offset)
