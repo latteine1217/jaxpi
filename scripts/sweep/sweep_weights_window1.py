@@ -1,18 +1,23 @@
 """
 What:
-    Optuna sweep：在 window-1 上搜尋最快收斂（ru/rv/rc < 5e-5）的 data loss weight 設定。
+    Optuna sweep：在 window-1 上搜尋最早穩定達標的 data loss weight。
 Why:
-    目標是找到讓 max(ru_loss, rv_loss, rc_loss) 最快低於 5e-5 的
-    u_data / v_data weight 組合，其餘參數固定在預設值。
+    先前的 scoring 用單次 threshold crossing，容易被 loss 震盪誤導。
+    現在改成比較最早連續 `k` 次滿足 `max(ru_loss, rv_loss, rc_loss) < threshold`
+    的步數，讓 objective 直接回答「哪個權重最快穩定收斂」。
+    並用 PatientPruner 包住 MedianPruner，避免 trial 因短期停滯就被過早剪掉。
+    目標仍是搜尋 u_data / v_data weight 組合，其餘參數固定在預設值。
     使用 K=100 QR-pivot sensor（Re=1e6, N=512）作為 data constraint。
     每個 trial 只跑 window-1（ablation config），
-    用 Optuna MedianPruner 剪掉無望 trial 節省時間。
+    保留原始短期動態，同時降低誤殺風險。
+    一旦 trial 提早穩定達標，就在當下保存唯一保留的 ckpt，並立即結束該 trial。
 
 Usage:
     uv run python scripts/sweep/sweep_weights_window1.py \
-        --n-trials 40 \
-        --max-steps 50000 \
+        --n-trials 60 \
+        --max-steps 100000 \
         --threshold 5e-5 \
+        --stable-reports 3 \
         --study-name kf_w1_data_weight_sweep \
         --storage sqlite:///sweep_w1_data.db
 """
@@ -33,16 +38,21 @@ sys.path.insert(0, str(_REPO_ROOT / "examples/kolmogorov_flow"))
 import importlib.util
 import numpy as np
 import optuna
-from optuna.pruners import MedianPruner
+from optuna.pruners import MedianPruner, PatientPruner
 
 import jax
 import wandb
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-DATA_WEIGHT_MIN = 1.0
-DATA_WEIGHT_MAX = 100.0
+DATA_WEIGHT_MIN = 5.0
+DATA_WEIGHT_MAX = 80.0
 DEFAULT_THRESHOLD = 5e-5
+DEFAULT_STABLE_REPORTS = 3
+DEFAULT_PATIENCE = 25
+DEFAULT_MIN_DELTA = 1e-5
+DEFAULT_N_TRIALS = 60
+DEFAULT_MAX_STEPS = 100000
 
 
 def suggest_data_weight(trial: optuna.Trial) -> float:
@@ -50,10 +60,32 @@ def suggest_data_weight(trial: optuna.Trial) -> float:
     What:
         定義 `data_weight` 的 Optuna 搜尋空間。
     Why:
-        先集中驗證 `1~100` 區間，直接回答 `100` 是否已經接近最佳設定。
+        根據目前 evidence，較有訊號的區域集中在中等到偏高權重；
+        先聚焦 `5~80`，保留對 `60` 以上區間的探索，同時避免把 trial
+        浪費在更高的外圍區間。
     """
 
     return trial.suggest_float("data_weight", DATA_WEIGHT_MIN, DATA_WEIGHT_MAX, log=True)
+
+
+def build_pruner():
+    """
+    What:
+        建立 sweep 用的 Optuna pruner。
+    Why:
+        `step_callback` 只在每次 log 時回報一次，因此 `patience` 以 report 次數計。
+        目前 `log_every_steps=100`，`patience=25` 約對應 2500 個 training steps 的觀察窗口。
+    """
+
+    return PatientPruner(
+        MedianPruner(
+            n_startup_trials=5,
+            n_warmup_steps=5000,
+            interval_steps=500,
+        ),
+        patience=DEFAULT_PATIENCE,
+        min_delta=DEFAULT_MIN_DELTA,
+    )
 
 def _load_config(config_path: str):
     spec = importlib.util.spec_from_file_location("_cfg", config_path)
@@ -79,8 +111,11 @@ def _build_config(trial: optuna.Trial, base_config_path: str, max_steps: int):
 
         config.training.max_steps = max_steps
 
-        # 關閉 checkpoint 儲存（sweep 不需要保留 ckpt）
-        config.saving.save_every_steps = None
+        # 只保留最後一個 checkpoint；若 trial 提早穩定達標，就保存停下來那一點。
+        config.saving.save_every_steps = max_steps
+        config.saving.num_keep_ckpts = 1
+        config.saving.ckpt_dir = str(_REPO_ROOT / "sweep_ckpts" / f"trial_{trial.number:04d}")
+        config.saving.overwrite = True
 
         # 關閉 wandb（train_one_window 內的 wandb.log 已加 `if wandb.run` guard）
         config.wandb.log = False
@@ -90,8 +125,14 @@ def _build_config(trial: optuna.Trial, base_config_path: str, max_steps: int):
 
 # ── objective ─────────────────────────────────────────────────────────────────
 
-def make_objective(base_config_path: str, max_steps: int, threshold: float, data_root: str,
-                   sensor_json: str):
+def make_objective(
+    base_config_path: str,
+    max_steps: int,
+    threshold: float,
+    stable_reports: int,
+    data_root: str,
+    sensor_json: str,
+):
     """
     What: 工廠函式，回傳 Optuna objective。
     Why: 閉包捕捉固定參數，讓 objective 簽名符合 Optuna 規範。
@@ -194,8 +235,8 @@ def make_objective(base_config_path: str, max_steps: int, threshold: float, data
             )
             samplers["data"] = HostSampler(sensor_fn)
 
-        # ── early-stop callback ───────────────────────────────────────────
-        step_reached = [max_steps]  # 預設：未達門檻
+        # ── scoring / pruner callback ─────────────────────────────────────
+        stable_steps: list[int] = []
 
         def step_callback(step: int, log_dict: dict) -> str | None:
             ru = float(log_dict.get("ru_loss", np.inf))
@@ -203,15 +244,20 @@ def make_objective(base_config_path: str, max_steps: int, threshold: float, data
             rc = float(log_dict.get("rc_loss", np.inf))
             worst = max(ru, rv, rc)
 
-            # 向 Optuna 回報目前值（供 pruner 判斷）
-            trial.report(worst, step)
+            # 向 Optuna 回報 raw worst value（供 PatientPruner + MedianPruner 判斷）
+            trial.report(float(worst), step)
+
+            if worst < threshold:
+                stable_steps.append(step)
+            else:
+                stable_steps.clear()
+
+            if len(stable_steps) >= stable_reports:
+                # 以首次穩定達標的步數作為 objective，越小越好。
+                raise _StableConvergenceReached(stable_steps[0])
 
             if trial.should_prune():
                 raise optuna.TrialPruned()
-
-            if worst < threshold:
-                step_reached[0] = step
-                return "stop"
 
             return None
 
@@ -231,15 +277,35 @@ def make_objective(base_config_path: str, max_steps: int, threshold: float, data
                 parallel_state=parallel_state,
                 step_callback=step_callback,
             )
+        except _StableConvergenceReached as stable_hit:
+            from jaxpi.utils import save_checkpoint
+
+            ckpt_path = os.path.join(config.saving.ckpt_dir, "time_window_1")
+            save_checkpoint(
+                model.state,
+                ckpt_path,
+                keep=config.saving.num_keep_ckpts,
+                overwrite=config.saving.overwrite,
+            )
+            return float(stable_hit.first_step)
         except optuna.TrialPruned:
             raise
         except FloatingPointError:
             # NaN/Inf → 給出最差分數
-            return float(max_steps)
+            return float("inf")
 
-        return float(step_reached[0])
+        # 未在 max_steps 內穩定達標，回傳上限步數。
+        return float(max_steps)
 
     return objective
+
+
+class _StableConvergenceReached(RuntimeError):
+    """Internal control-flow exception used to short-circuit finished trials."""
+
+    def __init__(self, first_step: int):
+        super().__init__(f"stable convergence reached at step {first_step}")
+        self.first_step = first_step
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -253,11 +319,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     """
 
     parser = argparse.ArgumentParser(description="Optuna weight sweep for Kolmogorov window-1")
-    parser.add_argument("--n-trials",    type=int,   default=40)
-    parser.add_argument("--max-steps",   type=int,   default=50000,
+    parser.add_argument("--n-trials",    type=int,   default=DEFAULT_N_TRIALS)
+    parser.add_argument("--max-steps",   type=int,   default=DEFAULT_MAX_STEPS,
                         help="每個 trial 的最大訓練步數")
     parser.add_argument("--threshold",   type=float, default=DEFAULT_THRESHOLD,
-                        help="max(ru,rv,rc) 目標門檻")
+                        help="stable convergence threshold for max(ru, rv, rc)")
+    parser.add_argument("--stable-reports", type=int, default=DEFAULT_STABLE_REPORTS,
+                        help="需要連續幾次 report 低於 threshold 才算穩定達標")
     parser.add_argument("--study-name",  type=str,   default="kf_w1_data_weight_sweep")
     parser.add_argument("--storage",     type=str,   default=None,
                         help="Optuna storage URI，e.g. sqlite:///sweep.db")
@@ -287,17 +355,16 @@ def main():
     parser = build_arg_parser()
     args = parser.parse_args()
 
+    if args.stable_reports <= 0:
+        raise ValueError(f"--stable-reports must be positive, got {args.stable_reports}")
+
     # sensor_json 解析為絕對路徑
     sensor_json = args.sensor_json if os.path.isabs(args.sensor_json) else str(_REPO_ROOT / args.sensor_json)
 
     # 強制關閉 wandb（覆蓋 Slurm common.sh 可能設定的 offline）
     os.environ["WANDB_MODE"] = "disabled"
 
-    pruner = MedianPruner(
-        n_startup_trials=5,
-        n_warmup_steps=5000,
-        interval_steps=500,
-    )
+    pruner = build_pruner()
 
     study = optuna.create_study(
         study_name=args.study_name,
@@ -308,16 +375,22 @@ def main():
     )
 
     print(f"=== Sweep: {args.study_name} ===")
-    print(f"target   : max(ru,rv,rc) < {args.threshold}")
+    print("target   : minimize earliest stable crossing step of max(ru,rv,rc)")
     print(f"max_steps: {args.max_steps}")
     print(f"n_trials : {args.n_trials}")
+    print(f"range    : data_weight in [{DATA_WEIGHT_MIN}, {DATA_WEIGHT_MAX}] (log scale)")
+    print(f"threshold: {args.threshold}")
+    print(f"stable_k : {args.stable_reports}")
+    print(f"pruner   : Patient(Median), patience={DEFAULT_PATIENCE}, min_delta={DEFAULT_MIN_DELTA}")
     print(f"config   : {args.config}")
     print(f"sensor   : {sensor_json}")
+    print("score    : earliest step with k consecutive threshold hits")
 
     objective = make_objective(
         base_config_path=args.config,
         max_steps=args.max_steps,
         threshold=args.threshold,
+        stable_reports=args.stable_reports,
         data_root=args.data_root,
         sensor_json=sensor_json,
     )
@@ -326,7 +399,7 @@ def main():
 
     print("\n=== Best Trial ===")
     best = study.best_trial
-    print(f"  steps_to_threshold : {best.value}")
+    print(f"  earliest_stable_step : {best.value}")
     print(f"  params:")
     for k, v in best.params.items():
         print(f"    {k} = {v:.4g}")

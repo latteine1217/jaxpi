@@ -2,7 +2,7 @@
 #SBATCH --job-name=sweep_kf_w1_weights
 #SBATCH --output=logs/sweep_kf_w1_weights_%j.out
 #SBATCH --error=logs/sweep_kf_w1_weights_%j.err
-#SBATCH --time=72:00:00
+#SBATCH --time=14-00:00:00
 #SBATCH --partition=r740
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -21,11 +21,12 @@ fi
 source "${SCRIPT_DIR}/../lib/common.sh"
 
 PROJECT_DIR="${PROJECT_DIR:-${HOME}/jaxpi}"
-N_TRIALS="${N_TRIALS:-40}"
-MAX_STEPS="${MAX_STEPS:-50000}"
+N_TRIALS="${N_TRIALS:-60}"
+MAX_STEPS="${MAX_STEPS:-100000}"
 THRESHOLD="${THRESHOLD:-5e-5}"
-STUDY_NAME="${STUDY_NAME:-kf_w1_weight_sweep}"
-STORAGE="${STORAGE:-sqlite:///sweep_w1.db}"
+STABLE_REPORTS="${STABLE_REPORTS:-3}"
+STUDY_NAME="${STUDY_NAME:-kf_w1_data_weight_sweep_5to80_thr5e5_k3_100k_stopckpt}"
+STORAGE="${STORAGE:-sqlite:///sweep_w1_data_5to80_thr5e5_k3_100k_stopckpt.db}"
 CONFIG_PATH="${CONFIG_PATH:-examples/kolmogorov_flow/configs/paper_repro_soap_window1_ablation.py}"
 
 slurm_prepare_project "${PROJECT_DIR}" 0
@@ -41,6 +42,7 @@ slurm_print_header \
   "N_trials"   "${N_TRIALS}" \
   "Max_steps"  "${MAX_STEPS}" \
   "Threshold"  "${THRESHOLD}" \
+  "Stable_k"   "${STABLE_REPORTS}" \
   "Storage"    "${STORAGE}" \
   "Config"     "${CONFIG_PATH}"
 
@@ -53,6 +55,7 @@ START_TIME="$(date +%s)"
   --n-trials    "${N_TRIALS}" \
   --max-steps   "${MAX_STEPS}" \
   --threshold   "${THRESHOLD}" \
+  --stable-reports "${STABLE_REPORTS}" \
   --study-name  "${STUDY_NAME}" \
   --storage     "${STORAGE}" \
   --config      "${CONFIG_PATH}"
