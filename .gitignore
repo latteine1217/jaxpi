@@ -27,6 +27,7 @@ thesis/
 
 # Private Claude Code instructions
 CLAUDE.md
+.claude/
 
 # Backup files
 *.bak
@@ -43,3 +44,7 @@ docs/assets/
 # Eval run results (large; only key scalar summaries committed explicitly)
 eval_runs/
 !eval_runs/window1_checkpoint_sweep_direct_apply_20260416/
+
+# Sweep artifacts (Optuna storage + per-trial checkpoints)
+sweep_ckpts/
+*.db
