@@ -146,20 +146,20 @@ window.DEMO_DATA = {
     "summary_statistics": [
       {
         "Metric": "u_err",
-        "Mean": 0.002743,
-        "Min": 0.000962,
+        "Mean": 0.002651,
+        "Min": 3.312488090438584e-05,
         "Max": 0.007903
       },
       {
         "Metric": "v_err",
-        "Mean": 0.002911,
-        "Min": 0.001074,
+        "Mean": 0.002818,
+        "Min": 3.383027264550893e-05,
         "Max": 0.008504
       },
       {
         "Metric": "w_err",
-        "Mean": 0.060319,
-        "Min": 0.000734,
+        "Mean": 0.060276,
+        "Min": 0.00022141948101595243,
         "Max": 0.176233
       }
     ],
@@ -282,9 +282,9 @@ window.DEMO_DATA = {
         "Window": 1,
         "Checkpoint": 100000,
         "t_end": 0.05,
-        "u_err": 0.001132,
-        "v_err": 0.001147,
-        "w_err": 0.000734
+        "u_err": 3.312488090438584e-05,
+        "v_err": 3.383027264550893e-05,
+        "w_err": 0.00022141948101595243
       },
       {
         "Window": 2,
@@ -380,9 +380,9 @@ window.DEMO_DATA = {
         "Window": 1,
         "Checkpoint": 100000,
         "t_end": 0.05,
-        "u_err": 0.001132,
-        "v_err": 0.001147,
-        "w_err": 0.000734
+        "u_err": 3.312488090438584e-05,
+        "v_err": 3.383027264550893e-05,
+        "w_err": 0.00022141948101595243
       },
       {
         "Window": 2,
@@ -477,10 +477,10 @@ window.DEMO_DATA = {
       {
         "Window": 1,
         "legacy_w_err": 0.000734,
-        "localtime_w_err": 0.000734,
-        "drop_factor": 1.0,
+        "localtime_w_err": 0.00022141948101595243,
+        "drop_factor": 3.314974800916989,
         "legacy_uv_mean": 0.0011394999999999999,
-        "localtime_uv_mean": 0.0011394999999999999
+        "localtime_uv_mean": 3.347757677494739e-05
       },
       {
         "Window": 2,

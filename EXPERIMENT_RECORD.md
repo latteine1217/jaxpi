@@ -15,11 +15,26 @@
 
 ## [INDEX] Active Experiments
 
+### `3324` | `re1e6_n512_ds4_soap_sensor100_w50_w1_dw231429_eval`
+
+| Field | Value |
+| :--- | :--- |
+| Status | Completed (`2026-04-21 05:34 +0800`) |
+| Config | [paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py) |
+| Dataset | [kolmogorov_Re1e6_N512_T5_ds4.npy](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/data/kolmogorov_dns/kolmogorov_Re1e6_N512_T5_ds4.npy) |
+| Sensor Constraint | `QR-pivot K100` + fixed `u_data=v_data=23.1429` + `w_data=0` |
+| Time Horizon | `window 1` only, `max_steps=50000` |
+| Checkpoint Policy | `save_every_steps=1000`, `num_keep_ckpts=None` |
+| Launch Script | `/home/junyi/jaxpi/slurm_train_sensor100_w25.sh` with overridden `CONFIG_PATH` |
+| Workdir | `/home/junyi/jaxpi/runs/re1e6_n512_ds4_soap_sensor100_w50_w1_dw231429_eval` |
+| Current Risk | `2026-04-21 22:00 +0800` 的 direct `apply_fn` rerun 已確認 `3324` 真實 full-window error 為 `u/v ~1e-4`、`w ~4.6e-4 ~ 5.0e-4`；舊 `3326 ~1e-3` 結果已被推翻。當前風險不再是「是否卡在 ~1e-3 平台」，而是雖已明顯優於舊判讀，仍落後 `3137/3155 window1` 約 `2x ~ 3x`。 |
+| RNG Strategy | Not recorded |
+
 ### `3318` | `kf_w1_data_weight_sweep_1to100_thr5e5`
 
 | Field | Value |
 | :--- | :--- |
-| Status | Running |
+| Status | Completed (`2026-04-21 01:19 +0800`) |
 | Config | [paper_repro_soap_window1_ablation.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_window1_ablation.py) |
 | Dataset | [kolmogorov_Re1e6_N512_T5_ds4.npy](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/data/kolmogorov_dns/kolmogorov_Re1e6_N512_T5_ds4.npy) |
 | Sensor Constraint | `QR-pivot K100` |
@@ -27,7 +42,7 @@
 | Objective | fastest `max(ru_loss, rv_loss, rc_loss) < 5e-5` within `50000` steps |
 | Storage | `sqlite:///sweep_w1_data_1to100_thr5e5.db` |
 | Launch Script | `/home/junyi/jaxpi/slurm/sweep/sweep_kf_w1_weights.sh` |
-| Current Risk | `3317` 先以舊 remote 腳本誤啟動（header 仍是 `Threshold: 1e-5`），已在 30 秒內取消並改由 `3318` 重送；`3318` header 已確認吃到正確 `5e-5` threshold 與 `1..100` range 所對應的新版 Python / Slurm 腳本。 |
+| Current Risk | `3317` 先以舊 remote 腳本誤啟動（header 仍是 `Threshold: 1e-5`），已在 30 秒內取消並改由 `3318` 重送；`3318` 已於 `2026-04-21 01:19 +0800` 正常 `COMPLETED`，後續應讀取 study DB / log 判讀 trial 結果，而不是再查 queue state。 |
 | RNG Strategy | Not recorded |
 
 ### `3155` | `re1e6_n512_ds4_soap_sensor100_w50`
@@ -40,7 +55,7 @@
 | Sensor Constraint | `QR-pivot K100` + `u_data=100` + `v_data=100` + `w_data=0` |
 | Time Horizon | `50 windows` (`0.1s/window`) |
 | Launch Script | `/home/junyi/jaxpi/slurm_train_sensor100_w25.sh` with overridden `CONFIG_PATH` |
-| Current Risk | `2026-04-16` audit（`3261..3272`）確認舊 corrected full-window result 可由 direct `apply_fn` path 復現。`neural_net()` 的 `z[None, :] + outputs[0]` scalar-wrapper bug 已定位並修復（`models.py` L185-192 移除 `z.ndim == 1` 分支），修復後 smoke test 三項全 PASS（`u_ic_pred_fn` / `u_pred_fn` batch-invariance / vs direct diff < 1e-4）。`3259/3260` 的 `~1e-3` window-1 table 仍屬已廢棄的錯誤評估路徑，不可用於比較結論。`3273` direct `apply_fn` sweep 確認 window 1 兩組收斂底線均在 `~1e-3`；主風險移回跨 window 誤差累積行為。 |
+| Current Risk | `2026-04-21` 的 `3328` all-window direct re-evaluation 已補齊 `window 1..21`，證明 `3155` 的 apples-to-apples direct 誤差曲線與舊 corrected evaluator 量級一致；但在公平比較區間 `window 1..12` 上，`3155` 的平均 `u/v/w` 誤差都沒有優於 `3137`，主風險仍是跨 window 誤差累積而非 evaluator lineage。 |
 | RNG Strategy | Not recorded |
 
 目前主線判讀：
@@ -87,6 +102,10 @@
   - `window 13 / checkpoint_100000 -> u=0.010144, v=0.009809, w=0.201551`
   - `window 14 / checkpoint_10000  -> u=0.014820, v=0.012950, w=0.279143`
 - 到 `window 13` 為止，`u/v` 誤差仍停留在 `1e-2` 以內，但 `w_err` 從 `window 3` 起近乎單調上升；這和先前 `3150` 那種 `window 2` 立即崩壞不同，但仍未達專案成功門檻。
+- `2026-04-21` 的 `3328` direct `apply_fn` 全窗口重評估已正式覆蓋 `window 1..21`，其中：
+  - `window 14 / checkpoint_100000 -> u=0.013304, v=0.011479, w=0.227537`
+  - `window 21 / checkpoint_60000  -> u=0.040653, v=0.041705, w=0.459683`
+- 這表示 `3155` 的 direct 路徑與舊 corrected evaluator 讀值在量級上對齊，但 trend 並未變好；`w_err` 仍一路升到 `0.459683`。
     - `rv_loss = 3.420e-06`
   - `ru_loss`、`rv_loss` 在 `window 3` 的後續 `step 100..99900` 區間都沒有再低於 `1e-6`。
 
@@ -121,15 +140,18 @@
 | Dataset | [kolmogorov_Re1e6_N512_T5_ds4.npy](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/data/kolmogorov_dns/kolmogorov_Re1e6_N512_T5_ds4.npy) |
 | Checkpoint Root | `/home/junyi/jaxpi_upstream_soap_run/re1e6_n512_ds4_soap/ckpt` |
 | Training Logic | `window IC propagation` + `chunked IC propagation` |
-| Latest Verified Evidence | `3145` full-window evaluation rerun completed through `window 12 / checkpoint_60000`; `2026-04-15` horizontal vorticity PNG + GIF regenerated for windows `1..12` |
+| Latest Verified Evidence | `2026-04-21` 的 `3327` all-window direct `apply_fn` re-evaluation 已覆蓋 `window 1..12`；最新可信 baseline 是 `window 1 -> u=3.312488e-05, v=3.383027e-05, w=2.214195e-04` 到 `window 12 -> u=7.821861e-03, v=8.404544e-03, w=1.760991e-01` 的 direct 曲線，不再依賴 `3145` 的混合 lineage。 |
 | Current Risk | `window 12` 的 `w_err = 0.176233` 仍略高於門檻；`3146` 顯示主因更接近 high-k vorticity attenuation，而非大尺度相位崩潰 |
 | RNG Strategy | Not recorded |
 
 目前主線判讀：
 
 - `window 1 -> window 2` 已成功跨過，stale IC 問題可視為初步排除。
-- 修正後的 `3145` full-window rerun 顯示，`window 2+` 的 `u/v` 誤差維持在低區間，先前 `3144` 的高誤差主要來自 eval time-axis 錯位。
-- 但 `w_err` 仍隨窗口上升，到 `window 12` 達 `0.176233`；主線並非失敗，但也尚未完全達標。
+- `3327` 的 all-window direct re-evaluation 已直接證明：`window 1 -> 2` 的誤差跳升是真實現象，不是 `3145/3144` artifact。
+- `window 1` 的可信基準改為 `2026-04-21` direct `apply_fn` retained-checkpoint / all-window direct 結果：
+  - `checkpoint_90000 -> u=3.781654e-05, v=3.725810e-05, w=2.385928e-04`
+  - `checkpoint_100000 -> u=3.312488e-05, v=3.383027e-05, w=2.214195e-04`
+- `window 12` 的 direct 結果為 `u=0.007821861, v=0.008404544, w=0.176099102`；主線並非失敗，但也尚未完全達標。
 - `3146` 進一步顯示 `window 12` 的 `final_corr = 0.983843`、`low_k_ratio = 0.999527`、`high_k_ratio = 0.664633`，所以當前問題更像是小尺度渦度能量衰減。
 
 ### 2026-04-05 更新
@@ -152,6 +174,8 @@
   - `/home/junyi/jaxpi_upstream_soap_run/re1e6_n512_ds4_soap/ckpt/time_window_12/checkpoint_60000`
 
 - `3144` full-window 評估摘要：
+
+  [NOTE] `window 1` 這一列屬於歷史舊 artifact；`2026-04-21` re-audit 已確認真實 retained-checkpoint `3137 window 1` 應改以 direct `apply_fn` 結果為準。
 
 | Window | Checkpoint | t_end | u_err | v_err | w_err |
 | :--- | ---: | ---: | ---: | ---: | ---: |
@@ -275,6 +299,666 @@
 - 2026-04-20 已把這兩類假設集中到共用 helper，並要求 config 顯式宣告 `expected_time_remainder`，否則 eval 直接 fail-fast。
 
 ## [LOG] Chronological
+
+### [2026-04-21] `3324` | submit fixed-weight window-1 checkpoint-validation run
+
+- Time: `2026-04-21 02:18 +0800`
+- Status: COMPLETED (`ExitCode=0:0`)
+- Experiment or Job ID: `3324`
+
+Change:
+
+- 依人工指示，不再做 sweep，而是固定 `3318` 的最佳 `data_weight=23.1429`，重跑單獨的 window-1 驗證 job。
+- 新增 [paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py)：
+  - `u_data=v_data=23.1429`
+  - `max_windows_to_run=1`
+  - `max_steps=50000`
+  - `save_every_steps=1000`
+  - `num_keep_ckpts=None`
+- 使用 remote `/home/junyi/jaxpi/slurm_train_sensor100_w25.sh` 以 `CONFIG_PATH` 覆蓋提交新 job，避免再走 sweep path 丟失 checkpoint。
+
+Config / Dataset / Checkpoint:
+
+- Config: [paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py)
+- Workdir: `/home/junyi/jaxpi/runs/re1e6_n512_ds4_soap_sensor100_w50_w1_dw231429_eval`
+- Checkpoint policy: `save_every_steps=1000`, `num_keep_ckpts=None`
+- Target checkpoint region: `step ~46100` and final `50000`
+
+Evidence:
+
+- RED/GREEN:
+  - `python3 -m unittest tests/test_window1_fixed_weight_eval_config.py`
+    - before: import failed because config module did not exist
+    - after : `Ran 1 test ... OK`
+  - `python3 -m py_compile examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py`
+- Remote sync:
+  - `rsync ... paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py -> /home/junyi/jaxpi/examples/kolmogorov_flow/configs/...`
+- Submission:
+  - `sbatch -> Submitted batch job 3324`
+  - `squeue -j 3324` -> `RUNNING`
+  - stdout header:
+    - `Config   : examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py`
+    - `Workdir  : /home/junyi/jaxpi/runs/re1e6_n512_ds4_soap_sensor100_w50_w1_dw231429_eval`
+    - `devices: [CudaDevice(id=0), CudaDevice(id=1)]`
+  - completion:
+    - `3324 | COMPLETED | Elapsed=03:16:06 | ExitCode=0:0`
+    - `checkpoint_50000` saved to `/home/junyi/jaxpi/re1e6_n512_ds4_soap_sensor100_w50_w1_dw231429_eval/ckpt/time_window_1/checkpoint_50000`
+
+Interpretation:
+
+- `3324` 是第一個真正能拿來做 checkpoint evaluation 的 `data_weight=23.1429` 驗證 run。
+- 只有等 `time_window_1/checkpoint_46000` 附近與 `checkpoint_50000` 落盤後，才能回答「threshold 達標是否對應到真實場收斂」。
+
+Next:
+
+- 監看 `3324` 的 checkpoint 落盤與訓練 log。
+- 一旦 `step 46000` 與 `50000` 對應 checkpoint 出現，立即做 corrected evaluation。
+
+### [2026-04-21] `3326` | corrected evaluation for `3324` checkpoints `46000/47000/50000`
+
+- Time: `2026-04-21 15:35 +0800`
+- Status: COMPLETED (`ExitCode=0:0`)
+- Note: `[SUPERSEDED 2026-04-21 22:00 +0800]` 後續 direct `apply_fn` rerun 已證明本段 `~1e-3` 數字偏高，不應再作為 `3324` 的最終 field-error 依據。
+- Experiment or Job ID: `3326` (evaluation), source training job `3324`
+
+Change:
+
+- 為避免修改 evaluator 程式，建立三個只包含單一 checkpoint 的暫存 root，分別對 `3324` 的 `checkpoint_46000`、`checkpoint_47000`、`checkpoint_50000` 跑現有 corrected evaluator。
+- 每個 checkpoint 都各跑兩種模式：
+  - `window`：整個 window 的相對 L2
+  - `final_step`：該 window 最後時間點的相對 L2
+
+Config / Dataset / Checkpoint:
+
+- Config: [paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py)
+- Source checkpoint root: `/home/junyi/jaxpi/re1e6_n512_ds4_soap_sensor100_w50_w1_dw231429_eval/ckpt`
+- Eval output root: `/home/junyi/jaxpi/eval_runs/3324_ckpt_eval_20260421`
+- Output files:
+  - `window1_step_46000_window.npz`
+  - `window1_step_46000_final.npz`
+  - `window1_step_47000_window.npz`
+  - `window1_step_47000_final.npz`
+  - `window1_step_50000_window.npz`
+  - `window1_step_50000_final.npz`
+
+Evidence:
+
+- Slurm:
+  - `3326 | eval_3324_ckpts | COMPLETED | Elapsed=00:03:28 | ExitCode=0:0`
+- Corrected full-window L2 (`mode=window`):
+  - `46000 -> u=0.001145, v=0.001115, w=0.000842`
+  - `47000 -> u=0.001159, v=0.001154, w=0.000825`
+  - `50000 -> u=0.001235, v=0.001103, w=0.000817`
+- Corrected final-step L2 (`mode=final_step`):
+  - `46000 -> u=0.001171, v=0.001109, w=0.000894`
+  - `47000 -> u=0.001188, v=0.001115, w=0.000876`
+  - `50000 -> u=0.001277, v=0.001127, w=0.000861`
+- `3324` training tail near completion:
+  - `step 49600`: `rc=5.988e-06`, `ru=1.398e-05`, `rv=1.445e-05`
+  - `step 49900`: `rc=2.409e-06`, `ru=7.703e-06`, `rv=6.914e-06`
+
+Interpretation:
+
+- `data_weight=23.1429` 的確讓 residual losses 明顯低於 `5e-5`，而且 `46000 -> 50000` 都維持在 `1e-5 ~ 1e-6`。
+- 但對應的 corrected field error 並沒有進一步掉到 `1e-4` 級；三個 checkpoint 的 `u/v/w` 誤差都穩定停在 `~1e-3`。
+- 這說明 **`5e-5` residual threshold 不等於「field 已高度收斂」**；它比較像是把訓練帶到一個 `~1e-3` 的誤差平台。
+- 從 `46000 -> 50000` 看不到明顯的持續改善：
+  - `w_error` 略降 (`8.42e-4 -> 8.17e-4`)
+  - `u_error` 反而略升 (`1.145e-3 -> 1.235e-3`)
+  - `v_error` 幾乎持平
+- 因此若標準是專案成功門檻（`<=10%~15%`），`3324 window 1` 當然已在門檻內；但若標準是「是否已達非常低的 window-1 重建誤差」，目前更接近 **平台化收斂於 `1e-3`，不是持續往下收斂**。
+
+Next:
+
+- 若要確認這個 `~1e-3` 平台是否就是 window-1 可達上限，可再比較：
+  - `3324` vs `3318` sweep 同權重結論
+  - `3324` vs 舊 `3155 window1 checkpoint_100000` 的 corrected eval
+- 若要追更低 field error，不應只看 residual threshold；需考慮新的 objective 或直接以 field metric 做 model selection。
+
+### [2026-04-21] `3324` vs old `3155 window1 checkpoint_100000` | is the `~1e-3` plateau good or bad?
+
+- Time: `2026-04-21 15:45 +0800`
+- Status: Comparison completed
+- Experiment or Job ID: `3324`, historical `3155`
+
+Change:
+
+- 將 `3324` 的 corrected eval（`checkpoint_46000/47000/50000`）與舊 `3155 window 1 / checkpoint_100000` 的 direct `apply_fn` corrected result 並排比較。
+
+Config / Dataset / Checkpoint:
+
+- `3324`:
+  - Config: [paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py)
+  - Checkpoints: `46000`, `47000`, `50000`
+- `3155` historical reference:
+  - Config family: `paper_repro_soap_sensor100_n512_w50.py`
+  - Checkpoint: `window 1 / checkpoint_100000`
+  - Forward path: `direct_apply_fn` corrected evaluation
+
+Evidence:
+
+- Old `3155 window 1 / checkpoint_100000`:
+  - `u=3.3702579e-05, v=3.3535732e-05, w=2.2215085e-04`
+- `3324` corrected full-window:
+  - `46000 -> u=1.145e-03, v=1.115e-03, w=8.420e-04`
+  - `47000 -> u=1.159e-03, v=1.154e-03, w=8.250e-04`
+  - `50000 -> u=1.235e-03, v=1.103e-03, w=8.170e-04`
+- Ratio (`3324 / old 3155`):
+  - `46000 -> u x33.97, v x33.25, w x3.79`
+  - `47000 -> u x34.39, v x34.41, w x3.71`
+  - `50000 -> u x36.64, v x32.89, w x3.68`
+
+Interpretation:
+
+- 若以 `3155 window1 checkpoint_100000` 作為「window-1 已知高品質 reference」，那麼 `3324` 的 `~1e-3` 平台 **明顯偏差，不能算好**。
+- 差距不是邊際退步，而是：
+  - `u/v` 大約差 **33~37 倍**
+  - `w` 仍差 **3.7~3.8 倍**
+- 因此 `3324` 證明的是：`data_weight=23.1429` + residual threshold `5e-5` 能把訓練帶到一個穩定平台，但這個平台的 field quality 仍顯著差於舊 `3155` 的高品質 window-1 checkpoint。
+- 研究上應把 `5e-5 residual threshold` 視為「可用的 early stopping proxy」，而不是「高品質收斂」的充分條件。
+
+Next:
+
+- 若目標是逼近 `3155 window1 checkpoint_100000` 的品質，下一輪不能只固定 `23.1429` 和 `5e-5`；需改以 field metric 或更嚴的 proxy 來選 checkpoint / stop step。
+- 優先檢查：
+  - `data_weight=23.1429` 是否只是「最快達到 residual 門檻」而非「最佳 field quality」
+  - 100k steps 或更晚 checkpoint 是否能接近 `3155` 水準
+  - 是否要直接比較 `data_weight=23.1429` vs `data_weight=100` 的完整 checkpoint sweep
+
+### [2026-04-21] `3137` vs `3324` | `window 1` loss comparison plot for no-data vs sensor
+
+- Time: `2026-04-21 16:12 +0800`
+- Status: Visualization completed
+- Experiment or Job ID: baseline `3137`, sensor run `3324`
+
+Change:
+
+- 產生 `window 1` shared residual loss 對比圖，直接比較 no-data baseline (`3137`) 與固定 `data_weight=23.1429` 的 sensor run (`3324`)。
+- 新增可重跑腳本 [plot_window1_loss_compare.py](/Users/latteine/Documents/coding/jaxpi/scripts/analysis/plot_window1_loss_compare.py)，統一輸出 PNG、raw CSV 與文字摘要。
+
+Config / Dataset / Checkpoint:
+
+- Baseline:
+  - Run: `3137`
+  - Source raw CSV: [window1_loss_compare_raw.csv](/Users/latteine/Documents/coding/jaxpi/eval_runs/3155_all_windows_20260412_chunked/window1_loss_compare_raw.csv)
+- Sensor:
+  - Run: `3324`
+  - Config: [paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py)
+  - Source stderr: `/home/junyi/jaxpi/logs/kf_s100_w1_dw231429_eval_3324.err`
+- Output artifacts:
+  - Local plot: [window1_loss_compare.png](/Users/latteine/Documents/coding/jaxpi/eval_runs/3324_vs_3137_window1_loss_compare_20260421/window1_loss_compare.png)
+  - Local summary: [window1_loss_compare.txt](/Users/latteine/Documents/coding/jaxpi/eval_runs/3324_vs_3137_window1_loss_compare_20260421/window1_loss_compare.txt)
+  - Local raw dump: [window1_loss_compare_raw.csv](/Users/latteine/Documents/coding/jaxpi/eval_runs/3324_vs_3137_window1_loss_compare_20260421/window1_loss_compare_raw.csv)
+
+Evidence:
+
+- 比較範圍裁切為 shared horizon：`step <= 49900`
+- `rc_loss`
+  - no data: `<=1e-4 @ 10900`, `<=5e-5 @ 14300`, end=`1.683e-06`
+  - sensor: `<=1e-4 @ 10500`, `<=5e-5 @ 13800`, end=`2.409e-06`
+- `ru_loss`
+  - no data: `<=1e-4 @ 18500`, `<=5e-5 @ 22000`, end=`4.986e-06`
+  - sensor: `<=1e-4 @ 15700`, `<=5e-5 @ 21100`, end=`7.703e-06`
+- `rv_loss`
+  - no data: `<=1e-4 @ 18500`, `<=5e-5 @ 19600`, end=`4.951e-06`
+  - sensor: `<=1e-4 @ 15700`, `<=5e-5 @ 21100`, end=`6.914e-06`
+- End ratio (`sensor / no-data`):
+  - `rc=1.431`
+  - `ru=1.545`
+  - `rv=1.396`
+
+Interpretation:
+
+- `3324` 並不是單向較好或較差，而是呈現 **前中期略快、尾段略高** 的差異。
+- 具體來說，sensor run 在 `ru/rv` 上更早進入 `1e-4`，`rc/ru` 也略早碰到 `5e-5`；但到 shared horizon 結尾，三條 residual 都比 no-data 高約 `1.4x ~ 1.5x`。
+- 因此若只看「最快碰到門檻」，sensor 版本有優勢；若看 shared horizon 尾段 residual floor，no-data baseline 反而更低。
+- 這也再次支持：`3324` 的 `5e-5` crossing 不能直接當成高品質 field convergence 證據，必須和 corrected checkpoint eval 一起看。
+
+Next:
+
+- 若要把這張圖拿來支撐研究結論，應與 `3324` corrected checkpoint eval（`~1e-3` field plateau）一起引用。
+- 若要進一步比較 sensor 權重策略，可用同一腳本追加 `3155 (data_weight=100)`，形成 `3137 vs 3324 vs 3155` 的三方 `window 1` loss comparison。
+
+### [2026-04-21] `3137` | actual `window 1` retained checkpoints re-evaluated via direct `apply_fn`
+
+- Time: `2026-04-21 16:36 +0800`
+- Status: Partial checkpoint sweep completed
+- Experiment or Job ID: `3137`
+
+Change:
+
+- 針對 **真實 `3137` checkpoint tree** `/home/junyi/jaxpi_upstream_soap_run/re1e6_n512_ds4_soap/ckpt/time_window_1` 補跑 direct `apply_fn` 路徑的 checkpoint evaluation。
+- 因實際 retained checkpoints 只剩 `checkpoint_90000` 與 `checkpoint_100000`，所以這次只能做 **partial sweep**，不能宣稱為完整 `10k→100k` sweep。
+
+Config / Dataset / Checkpoint:
+
+- Config: [paper_repro_soap.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap.py)
+- Checkpoint root: `/home/junyi/jaxpi_upstream_soap_run/re1e6_n512_ds4_soap/ckpt`
+- Window: `1`
+- Available checkpoints:
+  - `checkpoint_90000`
+  - `checkpoint_100000`
+- Output artifacts:
+  - [checkpoint_sweep_summary.txt](/Users/latteine/Documents/coding/jaxpi/eval_runs/3137_window1_checkpoint_sweep_20260421/checkpoint_sweep_summary.txt)
+  - [checkpoint_sweep_results.csv](/Users/latteine/Documents/coding/jaxpi/eval_runs/3137_window1_checkpoint_sweep_20260421/checkpoint_sweep_results.csv)
+  - [checkpoint_sweep_error_vs_step.png](/Users/latteine/Documents/coding/jaxpi/eval_runs/3137_window1_checkpoint_sweep_20260421/checkpoint_sweep_error_vs_step.png)
+
+Evidence:
+
+- `checkpoint_90000`:
+  - `u=3.781654e-05`
+  - `v=3.725810e-05`
+  - `w=2.385928e-04`
+- `checkpoint_100000`:
+  - `u=3.312488e-05`
+  - `v=3.383027e-05`
+  - `w=2.214195e-04`
+- 這些數字與舊 `3145` 記錄的 `3137 window 1`：
+  - `u=0.001132`
+  - `v=0.001147`
+  - `w=0.000734`
+  存在明顯不一致。
+
+Interpretation:
+
+- 這次 direct `apply_fn` partial sweep 顯示：**真實 `3137` 在 `window 1 / step 90000` 就已經進到 `u/v ~3e-05`, `w ~2e-04` 的量級**，而不是 `~1e-3`。
+- 因此先前對話裡把 `3137` 說成 `~1e-3` 平台，是把不同評估路徑 / 不同 checkpoint lineage 混在一起了。
+- 更重要的是：`3145` 舊記錄與這次 `direct_apply_fn` 新結果對同一 `3137` root 出現衝突，這不是單純的 checkpoint step 差異，而是 **evaluation lineage mismatch**，必須再審計。
+
+Next:
+
+- 優先重新對照 `3145` 使用的 [eval_paper_repro_soap.py](/Users/latteine/Documents/coding/jaxpi/eval_paper_repro_soap.py) 與這次 `evaluate_window1_checkpoint_sweep.py` 的 direct `apply_fn` 路徑，定位為什麼同一 `3137` root 會出現 `e-3` vs `e-5` 分歧。
+- 在根因釐清前，不再把 `3145 window 1 = 0.001132/0.001147/0.000734` 當成 `3137 window 1` 的最終可信結論。
+
+### [2026-04-21] audit | trace `3145` vs `direct_apply_fn` discrepancy source for `3137 window 1`
+
+- Time: `2026-04-21 16:46 +0800`
+- Status: Root cause identified
+- Experiment or Job ID: historical `3145`, current `3137` re-audit
+
+Change:
+
+- 對照 `3145` 使用的 [eval_paper_repro_soap.py](/Users/latteine/Documents/coding/jaxpi/eval_paper_repro_soap.py) 與目前 `direct_apply_fn` 路徑，追查為何同一 `3137 window 1` 會出現 `~1e-3` 與 `~1e-5` 級的差異。
+
+Config / Dataset / Checkpoint:
+
+- Historical artifact:
+  - [eval_paper_repro_soap_0405_localtime](/Users/latteine/Documents/coding/jaxpi/eval_paper_repro_soap_0405_localtime)
+  - `window 1`: `u=0.001132, v=0.001147, w=0.000734`
+- Current true checkpoint root:
+  - `/home/junyi/jaxpi_upstream_soap_run/re1e6_n512_ds4_soap/ckpt/time_window_1`
+  - retained checkpoints: `90000`, `100000`
+- Current code paths audited:
+  - [eval_paper_repro_soap.py](/Users/latteine/Documents/coding/jaxpi/eval_paper_repro_soap.py)
+  - [models.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/models.py)
+  - [evaluate_window1_checkpoint_sweep.py](/Users/latteine/Documents/coding/jaxpi/scripts/analysis/evaluate_window1_checkpoint_sweep.py)
+
+Evidence:
+
+- `3145` 的執行時間是 `2026-04-05`，而 `models.py` 的 scalar-wrapper bug 修復紀錄是 `2026-04-16`。
+- 舊 `eval_paper_repro_soap.py` 的 full-window error 明確走 wrapper 路徑：
+  - `model.compute_l2_error_time_space_chunked(...)`
+  - 其內部再呼叫：
+    - `self.u_pred_fn(...)`
+    - `self.v_pred_fn(...)`
+    - `self.w_pred_fn(...)`
+- `models.py` 的修復紀錄已明示：
+  - 舊 `neural_net()` 在 scalar 輸入時會走 `z[None, :]` fake batch 維
+  - 在 double-vmap / chunked evaluator 下會造成 batch-size-dependent 錯誤
+- 今日新增的最小對照實驗（同一個 `3137 checkpoint_100000`、同一批 window-1 資料、同一份當前 `models.py`）顯示：
+  - wrapper path: `u=2.890209e-05, v=3.806159e-05, w=2.191839e-04`
+  - direct path: `u=2.890059e-05, v=3.806154e-05, w=2.191840e-04`
+  - abs diff: `~1e-09, 1e-11, 1e-10`
+- 這證明 **在目前已修復的 `models.py` 下，wrapper 與 direct 已經對齊**。
+- 另外，今天對真實 retained checkpoints 的 direct `apply_fn` partial sweep 也顯示：
+  - `90000 -> u=3.781654e-05, v=3.725810e-05, w=2.385928e-04`
+  - `100000 -> u=3.312488e-05, v=3.383027e-05, w=2.214195e-04`
+
+Interpretation:
+
+- `3145 window 1 ~1e-3` 的來源，不是當前 code path 的真實行為，而是 **2026-04-05 당시舊 wrapper/scalar path bug 所產生的歷史 artifact**。
+- 這次 audit 已經把兩個可能性分開：
+  - 不是 checkpoint root 錯了：今天直接對真實 `3137` retained checkpoints 重跑，結果仍在 `e-5 / e-4`
+  - 不是當前 wrapper 仍壞掉：修復後 wrapper 與 direct 在同一資料上已數值對齊
+- 因此 `3145` 的 `window 1` 數字應視為 **已過期、已被新證據推翻的舊評估結果**。
+
+Next:
+
+- 後續若要引用 `3137 window 1`，應以 `2026-04-21` 的 direct `apply_fn` partial sweep 為準，而不是 `3145` 的 `window 1` 欄位。
+- 若要完全清除混淆，可考慮重跑一個只針對 `3137 window 1` 的現代版 wrapper evaluator artifact，取代舊 `eval_paper_repro_soap_0405_localtime` 中的 `window 1` 數字。
+
+### [2026-04-21] `3137` vs `3324` | redraw `window 1` error comparison using corrected `3137` values
+
+- Time: `2026-04-21 16:49 +0800`
+- Status: Visualization completed
+- Note: `[SUPERSEDED 2026-04-21 22:04 +0800]` 本段使用的是 `3326` 舊 corrected eval；`3324` direct rerun 完成後，倍率已由 `~33x ~ 37x` 下修為 `~2x ~ 3x`。
+- Experiment or Job ID: `3137`, `3324`
+
+Change:
+
+- 重新繪製 `window 1` corrected error comparison，改用：
+  - `3137` 真實 retained checkpoints (`90000`, `100000`) 的 direct `apply_fn` 結果
+  - `3324` corrected full-window eval (`46000`, `47000`, `50000`)
+- 新增可重跑腳本 [plot_window1_error_compare.py](/Users/latteine/Documents/coding/jaxpi/scripts/analysis/plot_window1_error_compare.py)。
+
+Config / Dataset / Checkpoint:
+
+- `3137` source:
+  - [checkpoint_sweep_results.csv](/Users/latteine/Documents/coding/jaxpi/eval_runs/3137_window1_checkpoint_sweep_20260421/checkpoint_sweep_results.csv)
+- `3324` source:
+  - [window1_full_window_errors.csv](/Users/latteine/Documents/coding/jaxpi/eval_runs/3324_ckpt_eval_20260421/window1_full_window_errors.csv)
+- Output:
+  - [window1_error_compare_3137_vs_3324.png](/Users/latteine/Documents/coding/jaxpi/eval_runs/3137_vs_3324_window1_error_compare_20260421/window1_error_compare_3137_vs_3324.png)
+  - [window1_error_compare_3137_vs_3324.txt](/Users/latteine/Documents/coding/jaxpi/eval_runs/3137_vs_3324_window1_error_compare_20260421/window1_error_compare_3137_vs_3324.txt)
+
+Evidence:
+
+- `3137 @ 100000`:
+  - `u=3.312488e-05`
+  - `v=3.383027e-05`
+  - `w=2.214195e-04`
+- `3324` best available (`w` 最低者為 `50000`)：
+  - `u=1.235000e-03`
+  - `v=1.103000e-03`
+  - `w=8.170000e-04`
+- Ratio (`3324 best available / 3137@100000`):
+  - `u x37.283`
+  - `v x32.604`
+  - `w x3.690`
+
+Interpretation:
+
+- 一旦把 `3137` 的 `window 1` 基準改回正確值，`3324` 就不再是「和 no-data 差不多都在 ~1e-3」。
+- 正確比較是：`3324` 明顯差於 `3137 window 1` 真實 retained checkpoint，尤其 `u/v` 差了 **約 33~37 倍**。
+- 因此後續若要討論 `3324` 的 field quality，不應再拿舊 `3145 window1 ~1e-3` 來當 no-data baseline。
+
+Next:
+
+- 把 repo 內會被使用者或 demo 讀到的 `3145 window1 ~1e-3` 引用逐一改口徑：
+  - `docs/demo-data.js`
+  - `EXPERIMENT_RECORD.md` active/index 段落
+  - 任何直接引用 `0.001132 / 0.001147 / 0.000734` 作為 `3137 window 1` 最終結論的位置
+
+### [2026-04-21] `3327` | launch all-window direct re-evaluation for `3137`
+
+- Time: `2026-04-21 17:02 +0800`
+- Status: RUNNING
+- Experiment or Job ID: `3327`
+
+Change:
+
+- 依人工要求，不再只修正 `window 1`，而是對 `3137` 的 **全部已落盤窗口** 重做 direct `apply_fn` full-window evaluation。
+- 新增 [evaluate_all_windows_direct.py](/Users/latteine/Documents/coding/jaxpi/scripts/analysis/evaluate_all_windows_direct.py)，固定使用：
+  - 真實 checkpoint tree
+  - 每個 `time_window_k` 的 latest retained checkpoint
+  - current verified direct path
+
+Config / Dataset / Checkpoint:
+
+- Config: [paper_repro_soap.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap.py)
+- Checkpoint root: `/home/junyi/jaxpi_upstream_soap_run/re1e6_n512_ds4_soap/ckpt`
+- Output dir: `/home/junyi/jaxpi/eval_runs/3137_all_windows_direct_20260421`
+- Window scope: `1..12`
+- Submission:
+  - `sbatch --job-name=eval_3137_all_direct ...`
+  - Slurm job id: `3327`
+
+Evidence:
+
+- Local syntax check:
+  - `python3 -m py_compile scripts/analysis/evaluate_all_windows_direct.py`
+- Remote sync:
+  - `/home/junyi/jaxpi/scripts/analysis/evaluate_all_windows_direct.py`
+- Slurm:
+  - `Submitted batch job 3327`
+  - `squeue -j 3327 -> RUNNING on acmt20`
+
+Interpretation:
+
+- 這次是把 `3137 window 1` 的 direct re-audit 擴展成全窗口版本，目的是徹底清除 `3145` 舊 artifact 對 `3137 baseline` 的污染。
+- 在 `3327` 完成前，`window 2..12` 仍暫時沿用舊 corrected local-time rerun；完成後應以 `3327` 為新的單一路徑 baseline。
+
+Next:
+
+- 等 `3327` 完成後，回收：
+  - `summary.txt`
+  - `all_window_direct_results.csv`
+  - `window_error_comparison.png`
+- 再用這份全窗口 direct baseline 重做：
+  - `3137 vs 3155` per-window error trend
+  - 必要時同步更新 thesis 敘述與 demo data
+
+### [2026-04-21] `3327` | all-window direct re-evaluation for `3137` completed
+
+- Time: `2026-04-21 18:21 +0800`
+- Status: COMPLETED (`ExitCode=0:0`)
+- Experiment or Job ID: `3327`
+
+Change:
+
+- 完成 `3137` 真實 checkpoint tree 的 `window 1..12` direct `apply_fn` full-window evaluation。
+- 這份結果現在可以取代混合 `3145` 舊 artifact 的 baseline，作為 `3137` 的單一路徑 corrected baseline。
+
+Config / Dataset / Checkpoint:
+
+- Config: [paper_repro_soap.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap.py)
+- Checkpoint root: `/home/junyi/jaxpi_upstream_soap_run/re1e6_n512_ds4_soap/ckpt`
+- Output dir: `/home/junyi/jaxpi/eval_runs/3137_all_windows_direct_20260421`
+- Local artifacts:
+  - [summary.txt](/Users/latteine/Documents/coding/jaxpi/eval_runs/3137_all_windows_direct_20260421/summary.txt)
+  - [all_window_direct_results.csv](/Users/latteine/Documents/coding/jaxpi/eval_runs/3137_all_windows_direct_20260421/all_window_direct_results.csv)
+  - [window_error_comparison.png](/Users/latteine/Documents/coding/jaxpi/eval_runs/3137_all_windows_direct_20260421/window_error_comparison.png)
+
+Evidence:
+
+- Slurm:
+  - `3327 | COMPLETED | Elapsed=00:28:26 | ExitCode=0:0`
+- Direct full-window results:
+  - `window 1 / checkpoint_100000 -> u=3.312488e-05, v=3.383027e-05, w=2.214195e-04`
+  - `window 2 / checkpoint_100000 -> u=6.558106e-05, v=6.549775e-05, w=6.876990e-04`
+  - `window 3 / checkpoint_100000 -> u=1.294855e-04, v=1.363780e-04, w=3.224143e-03`
+  - `window 4 / checkpoint_100000 -> u=2.791856e-04, v=3.096886e-04, w=9.737843e-03`
+  - `window 5 / checkpoint_100000 -> u=5.484705e-04, v=6.193409e-04, w=1.992797e-02`
+  - `window 6 / checkpoint_100000 -> u=9.573215e-04, v=1.039929e-03, w=3.341517e-02`
+  - `window 7 / checkpoint_100000 -> u=1.506963e-03, v=1.612425e-03, w=4.913890e-02`
+  - `window 8 / checkpoint_100000 -> u=2.279739e-03, v=2.400119e-03, w=7.073084e-02`
+  - `window 9 / checkpoint_100000 -> u=3.351144e-03, v=3.397276e-03, w=9.338640e-02`
+  - `window 10 / checkpoint_100000 -> u=4.574165e-03, v=4.756622e-03, w=1.194688e-01`
+  - `window 11 / checkpoint_100000 -> u=6.006283e-03, v=6.456355e-03, w=1.454885e-01`
+  - `window 12 / checkpoint_60000 -> u=7.821861e-03, v=8.404544e-03, w=1.760991e-01`
+
+Interpretation:
+
+- `window 1 -> 2` 的確有明顯跳升，但不是先前混合口徑造成的假象；用 direct 路徑重做後，`u/v` 仍從 `~3e-05` 升到 `~6.5e-05`，`w` 從 `2.2e-04` 升到 `6.9e-04`。
+- 更重要的是，`window 2..12` 的整體趨勢與舊 corrected local-time rerun 在量級上高度一致，表示先前對跨窗誤差累積的研究判讀大方向沒有翻案；真正需要修正的是 `window 1` 基準。
+- 這份結果現在應成為後續所有 `3137 vs 3155`、`3137 vs 3324` 比較的 no-data baseline。
+
+Next:
+
+- 用 `3327` 的全窗口 direct baseline 重畫 `3137 vs 3155` error trend，取代目前仍部分依賴舊 rerun 的版本。
+- 必要時同步更新 thesis 圖與相關敘述。
+
+### [2026-04-21] `3328` | launch all-window direct re-evaluation for `3155`
+
+- Time: `2026-04-21 18:28 +0800`
+- Status: RUNNING
+- Experiment or Job ID: `3328`
+
+Change:
+
+- 為了讓 `3137 vs 3155` 回到完全同一路徑比較，提交 `3155` 的 all-window direct `apply_fn` full-window evaluation。
+- 使用與 `3327` 相同的 evaluator [evaluate_all_windows_direct.py](/Users/latteine/Documents/coding/jaxpi/scripts/analysis/evaluate_all_windows_direct.py)，只更換 config 與 checkpoint root。
+
+Config / Dataset / Checkpoint:
+
+- Config: [paper_repro_soap_sensor100_n512_w50.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50.py)
+- Checkpoint root: `/home/junyi/jaxpi/re1e6_n512_ds4_soap_sensor100_w50/ckpt`
+- Output dir: `/home/junyi/jaxpi/eval_runs/3155_all_windows_direct_20260421`
+- Window scope: `1..21`
+- Retained checkpoints:
+  - `window 1..20 -> checkpoint_100000`
+  - `window 21 -> checkpoint_60000` (also retains `50000`)
+
+Evidence:
+
+- Submission:
+  - `sbatch --job-name=eval_3155_all_direct ...`
+  - `Submitted batch job 3328`
+- Slurm:
+  - `squeue -j 3328 -> RUNNING on acmt20`
+
+Interpretation:
+
+- 這次完成後，`3137` 與 `3155` 兩條主線都會擁有同一路徑的 direct baseline / with-data evaluation，可正式重畫最終版 per-window error trend。
+- 在 `3328` 完成前，現有 `3155` 圖仍屬舊 corrected evaluator lineage，只能作為暫時參考。
+
+Next:
+
+- 等 `3328` 完成後，回收：
+  - `summary.txt`
+  - `all_window_direct_results.csv`
+  - `window_error_comparison.png`
+- 再正式重畫 `3137 vs 3155` 的最終版 per-window error trend。
+
+### [2026-04-21] `3328` | all-window direct re-evaluation for `3155` completed
+
+- Time: `2026-04-21 21:20 +0800`
+- Status: COMPLETED (`ExitCode=0:0`)
+- Experiment or Job ID: `3328`
+
+Change:
+
+- 回收 `3155` 的 all-window direct `apply_fn` full-window evaluation 結果，補齊 `3137 vs 3155` 的 apples-to-apples baseline。
+- 輸出 local artifact 並確認 `3155` 的 direct 路徑和先前 corrected evaluator 在量級上相符。
+
+Config / Dataset / Checkpoint:
+
+- Config: [paper_repro_soap_sensor100_n512_w50.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50.py)
+- Checkpoint root: `/home/junyi/jaxpi/re1e6_n512_ds4_soap_sensor100_w50/ckpt`
+- Local output dir: [3155_all_windows_direct_20260421](/Users/latteine/Documents/coding/jaxpi/eval_runs/3155_all_windows_direct_20260421)
+- Shared-plot consumer: [redraw_3137_3155_error_trends.py](/Users/latteine/Documents/coding/jaxpi/scripts/analysis/redraw_3137_3155_error_trends.py)
+
+Evidence:
+
+- `sacct -j 3328`:
+  - `3328 | eval_3155_all_direct | COMPLETED | ExitCode=0:0`
+- Local artifacts:
+  - Summary: [summary.txt](/Users/latteine/Documents/coding/jaxpi/eval_runs/3155_all_windows_direct_20260421/summary.txt)
+  - CSV: [all_window_direct_results.csv](/Users/latteine/Documents/coding/jaxpi/eval_runs/3155_all_windows_direct_20260421/all_window_direct_results.csv)
+  - Plot: [window_error_comparison.png](/Users/latteine/Documents/coding/jaxpi/eval_runs/3155_all_windows_direct_20260421/window_error_comparison.png)
+- Key direct results:
+  - `window 1  / checkpoint_100000 -> u=3.370493e-05, v=3.354592e-05, w=2.221507e-04`
+  - `window 12 / checkpoint_100000 -> u=7.831324e-03, v=8.349953e-03, w=1.741970e-01`
+  - `window 21 / checkpoint_60000  -> u=4.065330e-02, v=4.170452e-02, w=4.596829e-01`
+
+Interpretation:
+
+- `3155` 的 direct 曲線沒有推翻舊 corrected trend；它只是把比較口徑正式統一到 direct `apply_fn`。
+- 因此下一步不再是爭論 evaluator lineage，而是直接看同一路徑下 `3155` 是否真的比 `3137` 好。
+
+Next:
+
+- 用 `3327 + 3328` 的 direct CSV 重畫最終版 `3137 vs 3155` shared-window trend。
+- 後續所有 `3137 vs 3155` 的定量比較，應優先引用這兩個 direct artifact。
+
+### [2026-04-21] `3318` | corrected `1..100`, `5e-5` sweep finished
+
+- Time: `2026-04-21 01:19 +0800`
+- Status: COMPLETED (`ExitCode=0:0`)
+- Experiment or Job ID: `3318`
+
+Change:
+
+- 依人工要求回查 `3318` 是否仍在運行。
+- Slurm queue 已無 `3318`，accounting 顯示該 job 已正常完成。
+
+Config / Dataset / Checkpoint:
+
+- Job: `3318`
+- Study: `kf_w1_data_weight_sweep_1to100_thr5e5`
+- Storage: `sqlite:///sweep_w1_data_1to100_thr5e5.db`
+- Sweep target: fastest `max(ru_loss, rv_loss, rc_loss) < 5e-5`
+
+Evidence:
+
+- `squeue -j 3318` -> `Invalid job id specified`
+- `sacct -j 3318`:
+  - `3318 | sweep_kf_w1_weights | COMPLETED | Elapsed=1-03:53:02 | ExitCode=0:0`
+  - `Start=2026-04-19 21:26:17 +0800`
+  - `End=2026-04-21 01:19:19 +0800`
+
+Interpretation:
+
+- `3318` 已不在運行中；目前正確的下一步不是查 queue，而是讀取新 study DB 與 job log，判讀哪個 `data_weight` 最好、是否有人先穿越 `5e-5`。
+
+Next:
+
+- 讀取 `sweep_w1_data_1to100_thr5e5.db` 與 `sweep_kf_w1_weights_3318.out/.err`，整理完整 trial 結果表與最佳參數。
+
+### [2026-04-21] `3318` | study DB + log result summary
+
+- Time: `2026-04-21 09:00 +0800`
+- Status: Result summarized from study DB and Slurm log
+- Experiment or Job ID: `3318`
+
+Change:
+
+- 讀取 remote Optuna DB `sweep_w1_data_1to100_thr5e5.db` 與 `sweep_kf_w1_weights_3318.out/.err`，整理 `3318` 的完整 trial 結果。
+- 明確區分 `3317` 錯版遺留 trial 與 `3318` 正式 sweep trials，避免把污染資料混入結論。
+
+Config / Dataset / Checkpoint:
+
+- Study: `kf_w1_data_weight_sweep_1to100_thr5e5`
+- Storage: `/home/junyi/jaxpi/sweep_w1_data_1to100_thr5e5.db`
+- Log:
+  - `/home/junyi/jaxpi/logs/sweep_kf_w1_weights_3318.out`
+  - `/home/junyi/jaxpi/logs/sweep_kf_w1_weights_3318.err`
+- Sweep range: `data_weight in [1, 100]` (`log=True`)
+- Target: fastest `max(ru_loss, rv_loss, rc_loss) < 5e-5`
+
+Evidence:
+
+- Log footer:
+  - `=== Best Trial ===`
+  - `steps_to_threshold : 46100.0`
+  - `data_weight = 23.14`
+- DB raw table contains `41` trials (`0..40`):
+  - `trial 0 = RUNNING, data_weight = 136.278...`
+  - `trial 0` 超出本輪 `1..100` 範圍，且狀態殘留 `RUNNING`，可確定是錯版 `3317` 遺留，不屬於 `3318` 正式結果
+- 正式 `3318` trial 集合應取 `trial 1..40`
+- `trial 1..40` 摘要：
+  - `COMPLETE = 5`
+  - `PRUNED = 35`
+- `COMPLETE` trials:
+  - `trial 2  | data_weight=23.1429 | value=46100`
+  - `trial 5  | data_weight=6.8668  | value=47400`
+  - `trial 3  | data_weight=59.8651 | value=48200`
+  - `trial 4  | data_weight=3.1581  | value=49300`
+  - `trial 1  | data_weight=1.9164  | value=50000`
+- 最佳幾個 `PRUNED` trials（value 為 prune 時回報的 worst residual，不是達標步數）：
+  - `trial 24 | data_weight=52.0527 | reported worst=1.505e-4`
+  - `trial 31 | data_weight=1.4670  | reported worst=5.052e-4`
+  - `trial 28 | data_weight=57.1463 | reported worst=5.169e-4`
+  - `trial 20 | data_weight=7.4140  | reported worst=8.924e-4`
+  - `trial 30 | data_weight=17.1344 | reported worst=1.229e-3`
+
+Interpretation:
+
+- **最佳 `data_weight` 是 `23.14`**（trial 2），在正式 `3318` sweep 中最早於 `46100` steps 達到 `5e-5` 門檻。
+- **有 trial 真的達到 `5e-5`**，而且不是只有一個：
+  - `23.14 -> 46100 steps`
+  - `6.87  -> 47400 steps`
+  - `59.87 -> 48200 steps`
+  - `3.16  -> 49300 steps`
+- `data_weight=1.916` 沒有在 `50000` steps 內達標（value=`50000` 代表上限耗盡）。
+- `data_weight=100` **不是目前最佳**；最接近上界的正式 trial `99.94`（trial 26）被 prune，reported worst residual 仍為 `4.257e-3`，遠高於 `5e-5`。
+- 因此目前證據支持的不是「100 最好」，而是「中等偏高權重區（約 `20~60`）較有機會在 `5e-5` 目標下最快收斂」。
+- 但這仍是單一 window-1 sweep；不可把它外推成跨 window 最佳權重結論。
+
+Next:
+
+- 若要在 `20~60` 區間再細化，可做第二輪局部 sweep（例如 `10..80` 或 `15..40`）。
+- 若要把這結論用於正式訓練 config，應先做至少一個 window-2+ 驗證，避免把 window-1 最佳權重誤當成全流程最佳權重。
 
 ### [2026-04-20] eval audit | fail-fast window layout + unit-domain Fourier axis alignment
 
@@ -2200,6 +2884,7 @@ Next:
 ### [2026-04-12] `3155` vs `3137/3145` | with-data vs no-data per-window error trend
 
 - Status: Completed
+- Note: `[SUPERSEDED 2026-04-21]` 此段保留為歷史圖表血統；最終 apples-to-apples 比較已改用 `3327 + 3328` 的 all-window direct CSV，見後續 `2026-04-21` 重畫條目。
 - Compare Scope:
   - With data: `3155` (`sensor100`, `u_data + v_data`, `w_data = 0`)
   - No data: corrected `3137/3145` (`u_data = v_data = w_data = 0`)
@@ -2214,13 +2899,17 @@ Change:
 
 - 將 `3155` corrected full-window evaluation 與 corrected `3137/3145` baseline 放到同一張 `u_error / v_error / w_error` 趨勢圖比較。
 - baseline 數列使用 [docs/demo-data.js](/Users/latteine/Documents/coding/jaxpi/docs/demo-data.js) 中保存的 corrected `full_window_localtime` rows，避免誤用舊的 absolute-time `3144` 錯位結果。
+- `[UPDATED 2026-04-21]` 共享窗口 `1..12` 的圖與摘要已用修正後的 `3137 window 1` 真值重畫；舊版 `window 1 ~1e-3` 比較口徑不再使用。
 
 Evidence:
 
 - Mean over common windows `1..12`:
-  - `u_error`: `0.002743 -> 0.002402` (`with_data / no_data = 0.875715`)
-  - `v_error`: `0.002911 -> 0.002527` (`with_data / no_data = 0.868190`)
-  - `w_error`: `0.060319 -> 0.062222` (`with_data / no_data = 1.031557`)
+  - `u_error`: `0.002651 -> 0.002402` (`with_data / no_data = 0.905984`)
+  - `v_error`: `0.002818 -> 0.002527` (`with_data / no_data = 0.896793`)
+  - `w_error`: `0.060276 -> 0.062222` (`with_data / no_data = 1.032287`)
+- `window 1`:
+  - no data  (`3137`, corrected direct): `u=3.312488e-05, v=3.383027e-05, w=2.214195e-04`
+  - with data (`3155`)               : `u=3.400000e-05, v=3.400000e-05, w=2.220000e-04`
 - `window 12`:
   - no data  (`3137/3145`): `u=0.007903, v=0.008504, w=0.176233`
   - with data (`3155`)     : `u=0.007831, v=0.008350, w=0.174197`
@@ -2231,13 +2920,115 @@ Evidence:
 
 Interpretation:
 
-- 在共同窗口 `1..12` 上，加入 `u/v data` 後，`u_error` 與 `v_error` 平均約再下降 `12% ~ 13%`。
-- 但 `w_error` 的平均值沒有明顯改善，整體甚至略高約 `3%`；這表示 data constraint 主要幫助的是速度場，而不是根本解掉 vorticity 累積漂移。
+- 在共同窗口 `1..12` 上，用修正後的 `3137 window 1` 基準重算後，加入 `u/v data` 的平均收益較舊版判讀小一些：
+  - `u_error` 平均下降約 `9.4%`
+  - `v_error` 平均下降約 `10.3%`
+- `w_error` 的平均值仍沒有明顯改善，整體反而高約 `3.2%`；這表示 data constraint 主要幫助的是速度場，而不是根本解掉 vorticity 累積漂移。
 - 到 `window 12` 單點時，with-data 與 no-data 的 `w_err` 已非常接近（`0.174197` vs `0.176233`），因此更穩健的結論是：`u/v data` 對 `u/v` 有益，但對晚期 `w` 漂移只有有限幫助。
 
 Next:
 
 - 若 `3155 window 14+` 繼續往上跑，應持續觀察 `w_err` 是否再次脫離 `3137/3145` 的上升曲線。
+
+### [2026-04-21] `3137` vs `3155` | redraw final shared-window error trend from direct CSVs
+
+- Time: `2026-04-21 21:35 +0800`
+- Status: Completed
+- Compare Scope:
+  - No data: `3137` all-window direct reevaluation (`3327`)
+  - With data: `3155` all-window direct reevaluation (`3328`)
+- Common Window Range: `1..12`
+- Output:
+  - Local plot: [with_vs_without_data_window_trends_to12.png](/Users/latteine/Documents/coding/jaxpi/eval_runs/3155_all_windows_20260412_chunked/with_vs_without_data_window_trends_to12.png)
+  - Local summary: [with_vs_without_data_window_trends_to12.txt](/Users/latteine/Documents/coding/jaxpi/eval_runs/3155_all_windows_20260412_chunked/with_vs_without_data_window_trends_to12.txt)
+  - Thesis plot: [re1e6_with_vs_without_data_window_trends_to12.png](/Users/latteine/Documents/coding/jaxpi/thesis/figures/kolmogorov/re1e6_with_vs_without_data_window_trends_to12.png)
+
+Change:
+
+- 用 [redraw_3137_3155_error_trends.py](/Users/latteine/Documents/coding/jaxpi/scripts/analysis/redraw_3137_3155_error_trends.py) 直接讀取兩份 all-window direct CSV，重畫 shared-window `1..12` 的 `u/v/w` 誤差圖。
+- 舊版圖仍保留原路徑，但其 `3137` baseline 混入 `3137/3145` 舊 lineage；本次重畫後，`3137 vs 3155` 的主比較已完全不依賴 `3145`。
+
+Evidence:
+
+- Input CSV:
+  - [3137_all_windows_direct_20260421/all_window_direct_results.csv](/Users/latteine/Documents/coding/jaxpi/eval_runs/3137_all_windows_direct_20260421/all_window_direct_results.csv)
+  - [3155_all_windows_direct_20260421/all_window_direct_results.csv](/Users/latteine/Documents/coding/jaxpi/eval_runs/3155_all_windows_direct_20260421/all_window_direct_results.csv)
+- Summary (`window 1..12`):
+  - `u_error_mean_no_data=0.002296`
+  - `u_error_mean_with_data=0.002402`
+  - `v_error_mean_no_data=0.002436`
+  - `v_error_mean_with_data=0.002527`
+  - `w_error_mean_no_data=0.060127`
+  - `w_error_mean_with_data=0.062222`
+  - `u_ratio_with_over_no=1.046091`
+  - `v_ratio_with_over_no=1.037331`
+  - `w_ratio_with_over_no=1.034847`
+- Endpoint checks:
+  - `window 1`:
+    - no data (`3137`): `u=3.312488e-05, v=3.383027e-05, w=2.214195e-04`
+    - with data (`3155`): `u=3.370493e-05, v=3.354592e-05, w=2.221507e-04`
+  - `window 12`:
+    - no data (`3137`): `u=7.821861e-03, v=8.404544e-03, w=1.760991e-01`
+    - with data (`3155`): `u=7.831324e-03, v=8.349953e-03, w=1.741970e-01`
+
+Interpretation:
+
+- 用完全同一路徑的 direct baseline 重畫後，`3155` 在 shared windows `1..12` 的平均 `u/v/w` 誤差都沒有優於 `3137`。
+- `3155` 在 `window 12` 單點的 `v/w` 略低，但這不足以推翻整段區間平均仍略差的結論。
+- 因此較嚴格的結論應修正為：`sensor100 + u/v data` 沒有在公平 direct 比較下帶來整體 error 改善，只是局部末端 checkpoint 可以接近 baseline。
+
+Next:
+
+- 若後續要主張 sensor 約束有價值，不能只看 shared-window mean；需要另外找更直接的收斂速度、早期窗口、或 field-level 機制證據。
+
+### [2026-04-21] analysis | window-1 loss vs corrected error alignment (`3137`, `3155`, `3324`)
+
+- Time: `2026-04-21 21:45 +0800`
+- Status: Completed
+- Compare Scope:
+  - No data baseline: `3137`
+  - Sensor mainline: `3155`
+  - Sensor sweep-derived validation: `3324` (`data_weight=23.1429`)
+- Window: `1`
+- Output:
+  - Plot: [window1_loss_error_alignment.png](/Users/latteine/Documents/coding/jaxpi/eval_runs/loss_error_alignment_20260421/window1_loss_error_alignment.png)
+  - Summary: [window1_loss_error_alignment.txt](/Users/latteine/Documents/coding/jaxpi/eval_runs/loss_error_alignment_20260421/window1_loss_error_alignment.txt)
+  - Combined loss CSV: [window1_loss_compare_3137_3155_3324.csv](/Users/latteine/Documents/coding/jaxpi/eval_runs/loss_error_alignment_20260421/window1_loss_compare_3137_3155_3324.csv)
+
+Change:
+
+- 新增 [plot_loss_error_alignment.py](/Users/latteine/Documents/coding/jaxpi/scripts/analysis/plot_loss_error_alignment.py)，把三條 run 的 shared-horizon residual loss 與 corrected field error 放進同一張圖。
+- loss 統一裁到 `step <= 49900`，避免把 `3324` 的 `50000-step` run 和 `3137/3155` 的 `100000-step` 尾段混在一起。
+
+Evidence:
+
+- Shared loss horizon: `step <= 49900`
+- `rc_loss <= 5e-5`：
+  - `3137 -> 14300`
+  - `3155 -> 13900`
+  - `3324 -> 13800`
+- `ru_loss <= 5e-5`：
+  - `3137 -> 22000`
+  - `3155 -> 20200`
+  - `3324 -> 21100`
+- `rv_loss <= 5e-5`：
+  - `3137 -> 19600`
+  - `3155 -> 20200`
+  - `3324 -> 21100`
+- corrected field error:
+  - `3137 @ checkpoint_100000 -> u=3.312488e-05, v=3.383027e-05, w=2.214195e-04`
+  - `3155 @ checkpoint_100000 -> u=3.370493e-05, v=3.354592e-05, w=2.221507e-04`
+  - `3324 @ checkpoint_50000  -> u=1.235000e-03, v=1.103000e-03, w=8.170000e-04`
+
+Interpretation:
+
+- 這張圖直接證明：**loss crossing 順序不等於 field error 排名**。
+- `3324` 在部分 residual crossing 上不差，甚至略快，但 corrected field error 明顯差於 `3137/3155`；因此不能把 `5e-5` residual threshold 直接當成高品質收斂證據。
+- `3155` 和 `3137` 的 window-1 residual curve 幾乎重疊，但 shared-window error 比較並沒有帶來整體優勢；這表示 loss 更適合拿來做 `health/progress signal`，而不是 `model-selection signal`。
+
+Next:
+
+- 若要建立更穩定的訓練判讀規則，應以「loss 監控 + 定期 corrected error checkpoint eval」的雙軌方式選模型，而不是只用 residual threshold。
 
 ### [2026-04-12] `3155` vs `3137` | `time window 1` loss convergence comparison
 
@@ -2493,6 +3284,7 @@ Evidence:
 - `State = COMPLETED`
 - `Elapsed = 00:03:47`
 - Summary:
+  - `[HISTORICAL_ARTIFACT]` `window 1` 這一列已被 `2026-04-21` direct `apply_fn` re-audit 推翻；後續若引用 `3137 window 1`，應改用 `checkpoint_90000/100000 -> u/v ~3e-05, w ~2e-04`
   - `window 1`: `u=0.001132`, `v=0.001147`, `w=0.000734`
   - `window 12`: `u=0.007903`, `v=0.008504`, `w=0.176233`
   - `mean(u_err) = 0.002743`
@@ -2579,6 +3371,7 @@ Evidence:
 - `State = COMPLETED`
 - `Elapsed = 00:05:24`
 - Summary:
+  - `[HISTORICAL_ARTIFACT]` `window 1` 這一列屬於 bug 修復前舊 evaluator 輸出，不可再當成 `3137 window 1` 最終真值
   - `window 1`: `u=0.001132`, `v=0.001147`, `w=0.000734`
   - `window 12`: `u=0.180390`, `v=0.178034`, `w=0.640494`
   - `mean(w_err) = 0.437814`
@@ -3027,3 +3820,944 @@ Interpretation:
 
 - `window 1` 對齊很好，但後續窗口快速失真。
 - 這筆歷史資料證明「window 1 可成功」，也暗示多 window time marching 本身有問題。
+
+### [2026-04-21] `3324` | rerun direct evaluation for checkpoints `46000/47000/50000`
+
+- Time: `2026-04-21 22:00 +0800`
+- Status: Completed
+- Experiment or Job ID: source training job `3324`
+
+Change:
+
+- 依人工要求重跑 `3324` 的 direct evaluation，避免只依賴先前 `3326` 的 corrected evaluator。
+- 直接在遠端 `.venv` 中使用 [evaluate_window1_checkpoint_sweep.py](/Users/latteine/Documents/coding/jaxpi/scripts/analysis/evaluate_window1_checkpoint_sweep.py) 的 `direct_apply_fn` 路徑，對 `checkpoint_46000/47000/50000` 重算 full-window relative L2。
+
+Config / Dataset / Checkpoint:
+
+- Config: [paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py)
+- Checkpoint root: `/home/junyi/jaxpi/re1e6_n512_ds4_soap_sensor100_w50_w1_dw231429_eval/ckpt`
+- Output:
+  - [checkpoint_sweep_summary.txt](/Users/latteine/Documents/coding/jaxpi/eval_runs/3324_direct_ckpt_eval_20260421/checkpoint_sweep_summary.txt)
+  - [checkpoint_sweep_results.csv](/Users/latteine/Documents/coding/jaxpi/eval_runs/3324_direct_ckpt_eval_20260421/checkpoint_sweep_results.csv)
+  - [checkpoint_sweep_error_vs_step.png](/Users/latteine/Documents/coding/jaxpi/eval_runs/3324_direct_ckpt_eval_20260421/checkpoint_sweep_error_vs_step.png)
+
+Evidence:
+
+- direct rerun:
+  - `checkpoint_46000 -> u=1.316588e-04, v=1.331908e-04, w=4.957606e-04`
+  - `checkpoint_47000 -> u=1.047420e-04, v=1.025183e-04, w=4.838619e-04`
+  - `checkpoint_50000 -> u=1.031410e-04, v=1.036893e-04, w=4.554458e-04`
+- old `3326` vs new direct ratio:
+  - `checkpoint_50000`
+    - `u: 1.235e-03 -> 1.031e-04` (`11.97x` lower)
+    - `v: 1.103e-03 -> 1.037e-04` (`10.64x` lower)
+    - `w: 8.170e-04 -> 4.554e-04` (`1.79x` lower)
+
+Interpretation:
+
+- `3326` 的 `~1e-3` 判讀不再可信；至少對 `3324` 這三個 checkpoint 來說，已被 direct rerun 明確推翻。
+- 真實的 `3324` window-1 品質比先前判讀好得多：它不是 `~1e-3` 平台，而是 `u/v ~1e-4`、`w ~4.6e-4`。
+- 但即使如此，`3324` 仍沒有追上 `3137/3155 window1` 的最佳 checkpoint。
+
+Next:
+
+- 後續若要引用 `3324`，應以這次 direct rerun 為唯一可信 field-error 來源。
+- 舊 `3326` 與其衍生圖表只保留作為歷史 artifact，不再作為研究結論依據。
+
+### [2026-04-21] `3137` vs `3324` | redraw `window 1` error comparison using direct `3324` rerun
+
+- Time: `2026-04-21 22:04 +0800`
+- Status: Visualization completed
+- Experiment or Job ID: `3137`, `3324`
+
+Change:
+
+- 用 `3137` 的 direct retained-checkpoint baseline，加上 `3324` 新的 direct rerun CSV，重畫 `window 1` error comparison。
+
+Config / Dataset / Checkpoint:
+
+- `3137` source:
+  - [checkpoint_sweep_results.csv](/Users/latteine/Documents/coding/jaxpi/eval_runs/3137_window1_checkpoint_sweep_20260421/checkpoint_sweep_results.csv)
+- `3324` source:
+  - [window1_full_window_errors_direct.csv](/Users/latteine/Documents/coding/jaxpi/eval_runs/3324_direct_ckpt_eval_20260421/window1_full_window_errors_direct.csv)
+- Output:
+  - [window1_error_compare_3137_vs_3324.png](/Users/latteine/Documents/coding/jaxpi/eval_runs/3137_vs_3324_window1_error_compare_direct_20260421/window1_error_compare_3137_vs_3324.png)
+  - [window1_error_compare_3137_vs_3324.txt](/Users/latteine/Documents/coding/jaxpi/eval_runs/3137_vs_3324_window1_error_compare_direct_20260421/window1_error_compare_3137_vs_3324.txt)
+
+Evidence:
+
+- `3324` best available (`w` 最低者為 `50000`)：
+  - `u=1.031410e-04`
+  - `v=1.036893e-04`
+  - `w=4.554458e-04`
+- Ratio (`3324 best available / 3137@100000`):
+  - `u x3.114`
+  - `v x3.065`
+  - `w x2.057`
+
+Interpretation:
+
+- 重跑後，`3324` 已不再是先前說的「比 `3137` 差 30 多倍」。
+- 正確結論應修正為：`3324` 明顯差於 `3137`，但差距約是 `2x ~ 3x`，不是一個數量級以上的崩壞。
+
+### [2026-04-21] sweep logic update | replace threshold-crossing objective with tail-EMA scoring
+
+- Time: `2026-04-21 22:25 +0800`
+- Status: Applied
+
+Change:
+
+- 修改 [sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/scripts/sweep/sweep_weights_window1.py)：
+  - 搜尋範圍從 `1..100` 改成 `5..60`（`log=True`）
+  - objective 從「最快 `max(ru,rv,rc) < 5e-5`」改成：
+    - `worst_t = max(ru_t, rv_t, rc_t)`
+    - `ema_t = beta * ema_{t-1} + (1-beta) * worst_t`
+    - score = `mean(ema_t over last 20% of training)`
+  - pruner 改成看 `EMA(worst)` 而不是 raw `worst`
+  - 保留 `--threshold` 參數僅作相容性用途，不再用於主 scoring
+- 同步更新 [test_sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/tests/test_sweep_weights_window1.py)：
+  - 驗證新搜尋範圍 `5..60`
+  - 驗證 `ema_beta=0.9`
+  - 驗證 `tail_fraction=0.2`
+
+Evidence:
+
+- `python3 -m py_compile scripts/sweep/sweep_weights_window1.py tests/test_sweep_weights_window1.py`
+- `python3 -m unittest tests/test_sweep_weights_window1.py` -> `OK`
+
+Interpretation:
+
+- 這次修改把 sweep 從「單次 threshold crossing 排名」改成「尾段 smoothed worst residual 排名」，可顯著降低 loss 震盪對 trial 排序與 pruner 的干擾。
+- 但它仍是 proxy，不是最終 truth；若要正式選最佳 `data_weight`，仍應對 top-K 進行 corrected field error 驗證。
+
+Next:
+
+- 若要啟動下一輪 sweep，建議直接沿用這個 v2 objective。
+- 執行後應觀察 top trials 是否集中在更窄的中等權重區，而不是再被單次 crossing 誤導。
+
+### [2026-04-22] sweep logic update | lighten EMA and wrap median pruning with patience
+
+- Time: `2026-04-22 17:31 +0800`
+- Status: Applied
+
+Change:
+
+- 依人工指示，調整 [sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/scripts/sweep/sweep_weights_window1.py) 的預設穩定化策略：
+  - `DEFAULT_EMA_BETA` 從 `0.9` 降到 `0.85`
+  - `MedianPruner(...)` 改成 `PatientPruner(MedianPruner(...), patience=25, min_delta=1e-5)`
+- 新增 `build_pruner()`，把 pruner 組態集中到單一函式，避免 CLI 預設、測試與實際 study 建立分叉。
+- 在程式註解中明確記錄：
+  - `step_callback` 只在每次 log 時回報一次
+  - 目前 `log_every_steps=100`
+  - 因此 `patience=25` 約對應 `2500` 個 training steps 的觀察窗口，而不是 `2500` 次 raw SGD step callback
+- 同步更新 [test_sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/tests/test_sweep_weights_window1.py)：
+  - 驗證 `ema_beta=0.85`
+  - 驗證 `PatientPruner` 外包 `MedianPruner`
+  - 驗證 `patience=25`, `min_delta=1e-5`
+
+Config / Dataset / Checkpoint:
+
+- Scope: sweep logic only
+- Target script: [sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/scripts/sweep/sweep_weights_window1.py)
+- Tests: [test_sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/tests/test_sweep_weights_window1.py)
+- Dataset / checkpoint: 無變更；本次僅調整 Optuna scoring / pruning 預設
+
+Evidence:
+
+- `python3 -m py_compile scripts/sweep/sweep_weights_window1.py tests/test_sweep_weights_window1.py`
+- `python3 -m unittest tests/test_sweep_weights_window1.py` -> `Ran 4 tests ... OK`
+- 相關程式路徑：
+  - `trial.report(float(ema_worst[0]), step)` 仍以 log callback 的 `step` 回報 intermediate value
+  - `train.py` 明確說明 `step_callback` 是「每次 log 時呼叫」
+  - base config `logging.log_every_steps = 100`
+
+Interpretation:
+
+- 這次修改不是把 sweep 變得更鈍，而是重新分工：
+  - `EMA(0.85)` 只做輕度去噪，保留較多短期動態
+  - `PatientPruner` 負責避免短期停滯造成的過早誤殺
+- 舊建議中的 `patience=2500` 若直接照字面放進 Optuna，會因為這支 sweep 每 `100` steps 才 report 一次而幾乎永遠不觸發；改成 `25` 才符合「約 2500 training steps」的原始意圖。
+- 目前這仍是 proxy-level 穩定化，不等於 field-error-aware selection；若後續 sweep 結論要進研究主結論，仍需 direct field evaluation 補驗證。
+
+Next:
+
+- 若要開下一輪 sweep，直接沿用這個新預設即可。
+- 執行後優先檢查：
+  - 被 prune trials 是否比舊版更少出現前期誤殺
+  - top-K 排名是否較舊版穩定
+  - 是否仍需要再微調 `ema_beta` 或 `min_delta`
+
+### [2026-04-22] sweep logic update | remove EMA, keep PatientPruner on raw worst residual
+
+- Time: `2026-04-22 17:42 +0800`
+- Status: Applied
+
+Change:
+
+- 依人工最新指示，將 [sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/scripts/sweep/sweep_weights_window1.py) 的 scoring / pruning metric 從 `EMA(max(ru,rv,rc))` 改回 raw `max(ru,rv,rc)`。
+- 刪除 CLI `--ema-beta` 與對應驗證邏輯，避免送 job 前仍殘留舊 objective 說法。
+- 保留 `PatientPruner(MedianPruner(...), patience=25, min_delta=1e-5)`：
+  - `trial.report(...)` 現在直接回報 raw `worst`
+  - final score 改成訓練尾段 raw `worst` 的平均值
+- 同步更新 [test_sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/tests/test_sweep_weights_window1.py)，確認 CLI 預設與 pruner 組態仍一致。
+
+Config / Dataset / Checkpoint:
+
+- Scope: sweep logic only
+- Target script: [sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/scripts/sweep/sweep_weights_window1.py)
+- Tests: [test_sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/tests/test_sweep_weights_window1.py)
+- Dataset / checkpoint: 無變更；本次僅改 Optuna objective / CLI
+
+Evidence:
+
+- `python3 -m py_compile scripts/sweep/sweep_weights_window1.py tests/test_sweep_weights_window1.py`
+- `python3 -m unittest tests/test_sweep_weights_window1.py` -> `Ran 4 tests ... OK`
+- 目前腳本 stdout 目標字樣已改為：
+  - `target   : minimize tail mean of max(ru,rv,rc)`
+
+Interpretation:
+
+- 現在的 sweep 不再把短期動態交給 EMA 濾掉；排序與 pruning 都直接看 raw `worst residual`。
+- `PatientPruner` 仍保留，用來處理「短期停滯不要立刻判死刑」；也就是說現在的分工是：
+  - metric: raw `max(ru,rv,rc)`
+  - anti-misprune: `PatientPruner`
+- 這比較符合人工要求的「不要 EMA，但保留 patience」；之後若要回答「最快收斂」與「最終最準」，仍需另外定義 threshold-crossing 與 final direct field eval 的輸出，不可把目前 proxy 直接當成最終 truth。
+
+Next:
+
+- 送 job 前若要再確認 objective，應以目前腳本輸出的 `tail mean of max(ru,rv,rc)` 為準。
+- 若要做 `100000` steps 的正式 sweep，下一步應同步決定：
+  - 搜尋範圍
+  - checkpoint 保留策略
+  - fastest-convergence 與 final-accuracy 的輸出欄位
+
+### [2026-04-22] sweep logic update | widen default data-weight range to `5..80` with log-scale sampling
+
+- Time: `2026-04-22 17:44 +0800`
+- Status: Applied
+
+Change:
+
+- 依人工確認，將 [sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/scripts/sweep/sweep_weights_window1.py) 的預設 `data_weight` 搜尋空間從 `5..60` 擴大到 `5..80`。
+- 保持 `trial.suggest_float(..., log=True)` 不變，仍以 log scale 在單參數空間做第一輪區域探索。
+- 同步更新 [test_sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/tests/test_sweep_weights_window1.py) 的搜尋區間驗證。
+
+Config / Dataset / Checkpoint:
+
+- Scope: sweep search-space only
+- Target script: [sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/scripts/sweep/sweep_weights_window1.py)
+- Tests: [test_sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/tests/test_sweep_weights_window1.py)
+- Dataset / checkpoint: 無變更
+
+Evidence:
+
+- `python3 -m py_compile scripts/sweep/sweep_weights_window1.py tests/test_sweep_weights_window1.py`
+- `python3 -m unittest tests/test_sweep_weights_window1.py` -> `Ran 4 tests ... OK`
+- 目前 `suggest_data_weight()` 驗證為：
+  - `trial.suggest_float("data_weight", 5.0, 80.0, log=True)`
+
+Interpretation:
+
+- 這次不是改成線性掃描，而是保留 log-scale 的第一輪 coarse search，同時把上界延伸到 `80`，讓 `60` 以上仍有探索空間。
+- 這樣可以避免在尚未證明最佳區域很窄之前，就過早把搜尋空間縮死在 `60` 以下；若後續 top trials 明顯集中，再另做局部 refinement 會更有效率。
+
+Next:
+
+- 若要送正式 sweep job，下一步只剩把：
+  - `max_steps`
+  - `n_trials`
+  - checkpoint 保留策略
+  - fastest / final-best 的輸出方式
+  一次定稿後再提交。
+
+### [2026-04-22] sweep logic update | switch objective to earliest stable threshold crossing (`k=3`)
+
+- Time: `2026-04-22 17:54 +0800`
+- Status: Applied
+
+Change:
+
+- 依人工指示，將 [sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/scripts/sweep/sweep_weights_window1.py) 的 objective 從 `tail mean of max(ru,rv,rc)` 改成：
+  - 最早出現 **連續 `3` 次** `max(ru_loss, rv_loss, rc_loss) < threshold` 的步數
+- 新增 CLI `--stable-reports`，預設 `3`。
+- `trial.report(...)` 仍回報 raw `max(ru,rv,rc)`，供 `PatientPruner(MedianPruner(...))` 判斷。
+- 一旦 trial 首次達成穩定達標條件，就直接 short-circuit 返回該起始步數；若直到 `max_steps` 仍未穩定達標，則回傳 `max_steps`。
+- 同步更新 [test_sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/tests/test_sweep_weights_window1.py) 的 CLI 預設驗證。
+
+Config / Dataset / Checkpoint:
+
+- Scope: sweep objective / CLI only
+- Target script: [sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/scripts/sweep/sweep_weights_window1.py)
+- Tests: [test_sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/tests/test_sweep_weights_window1.py)
+- Search space: `data_weight in [5, 80]` (`log=True`)
+- Objective defaults:
+  - `threshold = 5e-5`
+  - `stable_reports = 3`
+  - `pruner = Patient(Median)`
+
+Evidence:
+
+- `python3 -m py_compile scripts/sweep/sweep_weights_window1.py tests/test_sweep_weights_window1.py`
+- `python3 -m unittest tests/test_sweep_weights_window1.py` -> `Ran 4 tests ... OK`
+- 目前 stdout 目標字樣已改為：
+  - `target   : minimize earliest stable crossing step of max(ru,rv,rc)`
+  - `stable_k : 3`
+
+Interpretation:
+
+- 現在這輪 sweep 終於直接回答人工真正要的問題：哪個 `data_weight` 能讓模型 **最快穩定達標**。
+- 這次不再把「最後尾段低不低」混成 objective，也不再受單次 spike crossing 誤導；因為只有連續 `3` 次都低於 threshold 才算成功。
+- 由於 `log_every_steps=100`，`k=3` 約代表連續 `300` 個 training steps 維持在 threshold 下。
+
+Next:
+
+- 若要送正式 fastest sweep job，接下來只剩定稿：
+  - `max_steps` 是否改成 `100000`
+  - `n_trials` 要多少
+  - 是否仍完全不存 checkpoint
+
+### [2026-04-21] `3329` / `3330` | launch window-1 checkpoint-validation reruns for `3137` and `3155`
+
+- Time: `2026-04-21 22:15 +0800`
+- Status:
+  - `3329`: RUNNING
+  - `3330`: PENDING (`Resources`)
+- Experiment or Job ID:
+  - `3329` = no-data (`3137`-style)
+  - `3330` = sensor100 (`3155`-style)
+
+Change:
+
+- 依人工要求提交兩個新的 `window 1` 驗證訓練：
+  - 一個對應 `3137` no-data baseline
+  - 一個對應 `3155` sensor100 baseline
+- 這兩個 rerun 都統一成：
+  - `max_windows_to_run = 1`
+  - `max_steps = 100000`
+  - `save_every_steps = 10000`
+  - `num_keep_ckpts = None`
+- 目標是確保至少保留 `checkpoint_50000` 與 `checkpoint_100000`，而且實際上會保留整串 `10000, 20000, ..., 100000`。
+
+Config / Dataset / Checkpoint:
+
+- New configs:
+  - [paper_repro_soap_window1_ckpt50k100k.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_window1_ckpt50k100k.py)
+  - [paper_repro_soap_sensor100_n512_w50_window1_ckpt50k100k.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_ckpt50k100k.py)
+- No-data workdir:
+  - `/home/junyi/jaxpi/re1e6_n512_ds4_soap_w1_ckpt10k`
+- Sensor workdir:
+  - `/home/junyi/jaxpi/re1e6_n512_ds4_soap_sensor100_w50_w1_ckpt10k`
+
+Evidence:
+
+- Local config validation:
+  - `python3 -m py_compile ...paper_repro_soap_window1_ckpt50k100k.py`
+  - `python3 -m py_compile ...paper_repro_soap_sensor100_n512_w50_window1_ckpt50k100k.py`
+- Remote config validation:
+  - `python3 -m py_compile /home/junyi/jaxpi/examples/kolmogorov_flow/configs/...`
+- Slurm submission:
+  - `Submitted batch job 3329`
+  - `Submitted batch job 3330`
+- Current queue/accounting:
+  - `3329 | w1_3137_ckpt10k | RUNNING | Node=acmt20`
+  - `3330 | w1_3155_ckpt10k | PENDING | Reason=Resources`
+
+Interpretation:
+
+- 舊 `3155` tree 雖然 config 名義上允許保留全部，但實際 retained tree 只剩 `90000/100000`；這次新 rerun 的目的就是消除這種不確定性。
+- 一旦這兩條 run 完成，後續 `3137/3155` 都能用相同 checkpoint grid 做更乾淨的 direct checkpoint sweep，而不是只比最後兩個 retained checkpoints。
+
+Next:
+
+- 監看 `3329/3330`，確認 `checkpoint_50000` 與 `checkpoint_100000` 都成功落盤。
+- 完成後優先做 direct checkpoint evaluation，比較 `50000` 與 `100000` 的 field error 是否已平台化。
+
+### [2026-04-22] `3331` | submit dependent postprocess eval for `3329/3330` window-1 checkpoints
+
+- Time: `2026-04-22 02:48 +0800`
+- Status: PENDING (`Dependency`)
+- Experiment or Job ID: `3331`
+
+Change:
+
+- 在 `3330` 尚未完成時，先提交一個 dependent postprocess job，讓 `3330` 正常結束後自動執行 window-1 checkpoint evaluation。
+- 使用現成的 [postprocess_kolmogorov_window1_checkpoint_sweep.sh](/Users/latteine/Documents/coding/jaxpi/slurm/postprocess/postprocess_kolmogorov_window1_checkpoint_sweep.sh)，只評估 `checkpoint_50000` 與 `checkpoint_100000`，並先關閉 field plots 以優先回收 scalar error。
+
+Config / Dataset / Checkpoint:
+
+- Dependency:
+  - `afterok:3330`
+- No-data config:
+  - [paper_repro_soap_window1_ckpt50k100k.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_window1_ckpt50k100k.py)
+- Sensor config:
+  - [paper_repro_soap_sensor100_n512_w50_window1_ckpt50k100k.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_ckpt50k100k.py)
+- No-data checkpoint root:
+  - `/home/junyi/jaxpi/re1e6_n512_ds4_soap_w1_ckpt50k100k/ckpt`
+- Sensor checkpoint root:
+  - `/home/junyi/jaxpi/re1e6_n512_ds4_soap_sensor100_w50_w1_ckpt50k100k/ckpt`
+- Steps:
+  - `50000,100000`
+- Output dir:
+  - `/home/junyi/jaxpi/eval_runs/window1_ckpt50k100k_eval_20260422`
+- Flags:
+  - `SKIP_FIELDS=1`
+
+Evidence:
+
+- Submission:
+  - `Submitted batch job 3331`
+- Queue state:
+  - `3331 | eval_w1_ckpt50k100k | PD | (Dependency)`
+  - `3330 | w1_3155_ckpt10k | R`
+
+Interpretation:
+
+- 這樣做可以把「等待 `3330` 結束」和「啟動評估」串成單一步驟，避免人工再盯一次 queue。
+- 因為 `3329` 已經完成，真正的 gating item 只有 `3330`；`afterok:3330` 就足夠。
+
+Next:
+
+- 等 `3330` 完成後，確認 `3331` 是否自動進入 `RUNNING`。
+- `3331` 完成後回收 `50000/100000` 的 direct full-window error，比較 `3137` vs `3155` 是否已在 `50000` 前後平台化。
+
+### [2026-04-22] `3330` / `3331` / manual direct eval | finalize `window 1` checkpoint comparison at `50000` and `100000`
+
+- Time: `2026-04-22 14:35 +0800`
+- Status: COMPLETED
+- Experiment or Job ID: `3330`, `3331`, manual direct eval follow-up
+
+Change:
+
+- 確認 `3330` 訓練已正常完成，`3331` dependency postprocess job 也已正常完成。
+- 追查後發現 `3331` 雖宣告要評估 `50000,100000`，但實際上只評到 `50000`；原因是 `sbatch --export=... CHECKPOINT_STEPS=50000,100000 ...` 內的逗號被 shell/export 分隔，導致腳本只收到 `50000`。
+- 因此另外以 direct `apply_fn` 手動補跑 `3329/3330` 的 `checkpoint_100000`，並將 `3324@50000` 一起納入同一張對照表。
+
+Config / Dataset / Checkpoint:
+
+- `3329` no-data rerun:
+  - Config: [paper_repro_soap_window1_ckpt50k100k.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_window1_ckpt50k100k.py)
+  - Checkpoint root: `/home/junyi/jaxpi/re1e6_n512_ds4_soap_w1_ckpt50k100k/ckpt`
+- `3330` sensor rerun:
+  - Config: [paper_repro_soap_sensor100_n512_w50_window1_ckpt50k100k.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_ckpt50k100k.py)
+  - Checkpoint root: `/home/junyi/jaxpi/re1e6_n512_ds4_soap_sensor100_w50_w1_ckpt50k100k/ckpt`
+- `3324` fixed-weight rerun:
+  - Config: [paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_dw231429_eval.py)
+  - Checkpoint root: `/home/junyi/jaxpi/re1e6_n512_ds4_soap_sensor100_w50_w1_dw231429_eval/ckpt`
+- Output roots:
+  - `3331` (`50000` only due export bug): [window1_ckpt50k100k_eval_20260422](/Users/latteine/Documents/coding/jaxpi/eval_runs/window1_ckpt50k100k_eval_20260422)
+  - manual direct `100000`: [window1_ckpt100k_eval_20260422](/Users/latteine/Documents/coding/jaxpi/eval_runs/window1_ckpt100k_eval_20260422)
+  - `3324` direct rerun: [3324_direct_ckpt_eval_20260421](/Users/latteine/Documents/coding/jaxpi/eval_runs/3324_direct_ckpt_eval_20260421)
+
+Evidence:
+
+- Slurm:
+  - `3330 | COMPLETED | Start=2026-04-22 04:43:33 +0800 | End=2026-04-22 11:09:52 +0800 | ExitCode=0:0`
+  - `3331 | COMPLETED | Start=2026-04-22 11:09:52 +0800 | End=2026-04-22 11:12:11 +0800 | ExitCode=0:0`
+- `3331` stdout header shows only:
+  - `Steps    : 50000`
+- `50000` comparison:
+  - `3329@50000` -> `u=1.118582e-03`, `v=1.192990e-03`, `w=8.370060e-04`
+  - `3330@50000` -> `u=1.078932e-03`, `v=1.143454e-03`, `w=8.267873e-04`
+  - `3324@50000` -> `u=1.031410e-04`, `v=1.036893e-04`, `w=4.554458e-04`
+- Manual direct `100000` comparison:
+  - `3329@100000` -> `u=3.348497e-05`, `v=3.307914e-05`, `w=2.219041e-04`
+  - `3330@100000` -> `u=3.462274e-05`, `v=3.425803e-05`, `w=2.317860e-04`
+- Relative ratios:
+  - `3330 / 3329 @50000` -> `u=0.965x`, `v=0.958x`, `w=0.988x`
+  - `3330 / 3329 @100000` -> `u=1.034x`, `v=1.036x`, `w=1.045x`
+  - `3329 / 3324 @50000` -> `u=10.85x`, `v=11.51x`, `w=1.84x`
+  - `3330 / 3324 @50000` -> `u=10.46x`, `v=11.03x`, `w=1.82x`
+
+Interpretation:
+
+- 只看 `50000`，`3324 (data_weight=23.1429)` 明顯領先 `3329/3330`，不是小幅優勢，而是 `u/v` 約 `10x ~ 11x`、`w` 約 `1.8x` 的差距。
+- 但到 `100000`，`3329/3330` 都已降到 `u/v ~3.3e-05 ~ 3.5e-05`、`w ~2.2e-04 ~ 2.3e-04`，明顯優於 `3324@50000`；這說明 `3324` 的價值較像是「前期收斂快」，不是「最終品質已經最好」。
+- `3330` 相對 `3329` 的差異在 `50000` 與 `100000` 都不大：
+  - `50000` 時 `3330` 略好
+  - `100000` 時反而略差
+- 因此目前最穩健的結論是：
+  - `data_weight=23.1429` 對 **前期收斂速度** 有幫助
+  - 但在 `window 1` 的最終品質上，尚未證明優於 no-data baseline 或 `3155`-style sensor baseline
+
+Next:
+
+- 若要正式討論 `data_weight` 是否值得採用，下一步應比較：
+  - `3324@50000`
+  - `3329@50000/100000`
+  - `3330@50000/100000`
+  的 loss 與 error 對齊情況，而不是只看單一步數。
+- 若要自動化後續 checkpoint comparison，需修正 postprocess submit 方式，避免 `--export` 對逗號值的截斷問題。
+
+### [2026-04-22] visualization | `window 1` step-vs-error plot for `3324`, `3329`, `3330`
+
+- Time: `2026-04-22 14:44 +0800`
+- Status: COMPLETED
+- Experiment or Job ID: `3324`, `3329`, `3330`
+
+Change:
+
+- 依使用者要求，將 `3324@50000`、`3329@50000/100000`、`3330@50000/100000` 畫成同一張 `step vs error` 對照圖，直接視覺化前期收斂優勢與後期品質反轉。
+
+Evidence:
+
+- Plot script:
+  - [plot_window1_step_vs_error_points.py](/Users/latteine/Documents/coding/jaxpi/scripts/analysis/plot_window1_step_vs_error_points.py)
+- Artifacts:
+  - [window1_step_vs_error_points.png](/Users/latteine/Documents/coding/jaxpi/eval_runs/window1_step_vs_error_points_20260422/window1_step_vs_error_points.png)
+  - [window1_step_vs_error_points.txt](/Users/latteine/Documents/coding/jaxpi/eval_runs/window1_step_vs_error_points_20260422/window1_step_vs_error_points.txt)
+
+Interpretation:
+
+- 圖上可直接看出：
+  - `3324` 在 `50000` 時位於最低區間
+  - `3329/3330` 到 `100000` 時已進一步降到更低 error
+- 這張圖適合用來支撐「`3324` 贏速度、`3329/3330` 贏終點」的判讀。
+
+Next:
+
+- 若後續要連結 sweep 設計，應把這張圖與 `window 1` loss comparison 一起看，而不是單獨引用 error 點。
+
+### [2026-04-22] visualization | complete `window 1` epoch-vs-error curves every `10000` steps for `3329` and `3330`
+
+- Time: `2026-04-22 16:01 +0800`
+- Status: COMPLETED
+- Experiment or Job ID: `3329`, `3330`
+
+Change:
+
+- 依使用者要求，整理 `window 1` 的完整 checkpoint error 曲線，將 `3329` 與 `3330` 每 `10000` step 的 direct full-window error 合併成一張 `epoch vs error` 圖。
+- `10000/20000` 採用先前已回收的 direct evaluator 數值；`30000..100000` 則使用後續補跑的 direct tail evaluation artifact 合併，最終形成 `10000..100000` 的完整十點曲線。
+
+Evidence:
+
+- Complete artifact:
+  - [checkpoint_sweep_results.csv](/Users/latteine/Documents/coding/jaxpi/eval_runs/window1_ckpt10k_complete_eval_20260422/checkpoint_sweep_results.csv)
+  - [epoch_vs_error_window1.png](/Users/latteine/Documents/coding/jaxpi/eval_runs/window1_ckpt10k_complete_eval_20260422/epoch_vs_error_window1.png)
+  - [summary.txt](/Users/latteine/Documents/coding/jaxpi/eval_runs/window1_ckpt10k_complete_eval_20260422/summary.txt)
+- Tail direct rerun source:
+  - [checkpoint_sweep_results.csv](/Users/latteine/Documents/coding/jaxpi/eval_runs/window1_sensor_tail_eval_20260422/checkpoint_sweep_results.csv)
+
+Interpretation:
+
+- `3330` 在 `10000` 與 `30000` 前期確實優於 `3329`，但在 `40000` 出現回彈，之後與 `3329` 幾乎貼近。
+- 到 `100000`，`3329` 仍略優於 `3330`：
+  - `u`: `3.348497e-05` vs `3.462274e-05`
+  - `v`: `3.307914e-05` vs `3.425803e-05`
+  - `w`: `2.219041e-04` vs `2.317860e-04`
+- 因此完整曲線支持的結論是：
+  - sensor100 baseline 對 early-stage convergence 有部分幫助
+  - 但在 `window 1` 終點品質上，沒有穩定超越 no-data baseline
+
+Next:
+
+- 若要把這張圖和 `3324` 一起納入 sweep 論證，應另外製作一張 `3324@1000-step` 與 `3329/3330@10000-step` 的對齊比較圖，避免把不同 checkpoint 解析度混為一談。
+
+### [2026-04-22] visualization | redraw epoch-vs-error figure with clean labels and full `3324@10000~50000`
+
+- Time: `2026-04-22 16:58 +0800`
+- Status: COMPLETED
+- Experiment or Job ID: source runs `3324`, `3329`, `3330`
+
+Change:
+
+- 依使用者更正要求，重做 `epoch vs error` 圖：
+  - label 不再顯示 job id
+  - `3324` 不再只放 `50000` 單點，而是補齊 `10000/20000/30000/40000/50000` 的 direct evaluation 後再納入同圖
+- 新圖使用的方法名稱：
+  - `No data`
+  - `Sensor100`
+  - `Sensor dw=23.1429`
+
+Evidence:
+
+- `3324` prefix direct eval:
+  - [checkpoint_sweep_results.csv](/Users/latteine/Documents/coding/jaxpi/eval_runs/3324_direct_ckpt10k_eval_20260422/checkpoint_sweep_results.csv)
+- Clean-label artifact:
+  - [epoch_vs_error_clean_labels.png](/Users/latteine/Documents/coding/jaxpi/eval_runs/window1_epoch_vs_error_clean_labels_20260422/epoch_vs_error_clean_labels.png)
+  - [epoch_vs_error_clean_labels.csv](/Users/latteine/Documents/coding/jaxpi/eval_runs/window1_epoch_vs_error_clean_labels_20260422/epoch_vs_error_clean_labels.csv)
+  - [epoch_vs_error_clean_labels.txt](/Users/latteine/Documents/coding/jaxpi/eval_runs/window1_epoch_vs_error_clean_labels_20260422/epoch_vs_error_clean_labels.txt)
+- `3324` added points:
+  - `10000 -> u=4.601948e-03, v=4.530223e-03, w=3.917131e-03`
+  - `20000 -> u=4.442899e-04, v=4.976123e-04, w=1.164529e-03`
+  - `30000 -> u=5.537331e-04, v=5.893375e-04, w=8.857403e-04`
+  - `40000 -> u=2.627931e-04, v=2.805152e-04, w=5.982067e-04`
+  - `50000 -> u=1.031410e-04, v=1.036893e-04, w=4.554458e-04`
+
+Interpretation:
+
+- 舊版只放 `3324@50000` 會讓人誤以為它整段都領先；補齊 `10000~50000` 後可見：
+  - `3324` 在 `10000` 其實最差
+  - `20000~40000` 也不是穩定領先
+  - 真正的明顯優勢主要出現在接近 `50000` 的後段
+- 因此新圖比舊版更忠實反映 `3324` 的真實收斂路徑：它不是「全程最快」，而是「前段波動較大、後段追上並在 `50000` 取得最低 error」。
+
+Next:
+
+- 若要把這張圖拿來支撐 sweep scoring 設計，應直接對照 tail-loss / EMA-loss，而不是只對照單一 checkpoint 結果。
+
+### [2026-04-22] visualization | add `50000` vertical reference line to clean-label epoch-vs-error figure
+
+- Time: `2026-04-22 17:05 +0800`
+- Status: COMPLETED
+- Experiment or Job ID: source runs `3324`, `3329`, `3330`
+
+Change:
+
+- 依使用者要求，在 clean-label `epoch vs error` 圖的三個 panel 都加入 `50000` 的垂直虛線與小型文字標記，讓 `Sensor dw=23.1429` 在 `50000` 附近取得最低 error 的區段更直觀。
+
+Evidence:
+
+- Updated plot script:
+  - [plot_window1_epoch_vs_error_clean_labels.py](/Users/latteine/Documents/coding/jaxpi/scripts/analysis/plot_window1_epoch_vs_error_clean_labels.py)
+- Updated artifact:
+  - [epoch_vs_error_clean_labels.png](/Users/latteine/Documents/coding/jaxpi/eval_runs/window1_epoch_vs_error_clean_labels_20260422/epoch_vs_error_clean_labels.png)
+
+Interpretation:
+
+- `50000` 參考線讓圖的閱讀重點更清楚：
+  - `Sensor dw=23.1429` 的優勢主要集中在這條線附近
+  - 不是整段 `10000~50000` 都穩定領先
+- 這也降低只看單一 legend/單點數字造成的誤判風險。
+
+Next:
+
+- 若還要進一步強化論點，可在同圖上再補一個 shaded band，標示 `3324` 的可用 checkpoint 範圍只到 `50000`。
+
+### [2026-04-22] sweep logic update | fast-convergence sweep now saves stop-point ckpt and uses `2e-5 / k=3 / 60 / 100000 upper bound`
+
+- Time: `2026-04-22 18:01 +0800`
+- Status: Applied
+
+Change:
+
+- 依人工最終定稿，將 [sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/scripts/sweep/sweep_weights_window1.py) 的正式設定整理為：
+  - `data_weight in [5, 80]` (`log=True`)
+  - `threshold = 2e-5`
+  - `stable_reports = 3`
+  - `n_trials = 60`
+  - `max_steps = 100000`（作為上限）
+- 調整 trial 結束語義：
+  - 不再要求 trial 一定跑滿 `100000`
+  - 一旦最早連續 `3` 次 `max(ru,rv,rc) < 2e-5`，就以該最早步數作為 objective
+  - 並在停下來當下手動保存唯一保留的 checkpoint
+- 每個 trial 的 checkpoint 目錄改成獨立：
+  - `sweep_ckpts/trial_XXXX/time_window_1/`
+  - 避免不同 trial 互相覆蓋
+- 同步更新 [slurm/sweep/sweep_kf_w1_weights.sh](/Users/latteine/Documents/coding/jaxpi/slurm/sweep/sweep_kf_w1_weights.sh) 的預設：
+  - `N_TRIALS=60`
+  - `MAX_STEPS=100000`
+  - `THRESHOLD=2e-5`
+  - `STABLE_REPORTS=3`
+  - 新 study/storage 名稱改成獨立 DB，避免和舊 sweep 混在一起
+- 同步更新 [test_sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/tests/test_sweep_weights_window1.py) 驗證新的 CLI 預設。
+
+Config / Dataset / Checkpoint:
+
+- Search space: `data_weight in [5, 80]` (`log=True`)
+- Objective: earliest stable crossing step of `max(ru,rv,rc)`
+- Stable criterion: `k = 3`
+- Threshold: `2e-5`
+- Trial upper bound: `100000`
+- Checkpoint policy: save only the stop-point / final-point ckpt for each completed trial
+
+Evidence:
+
+- Local verification:
+  - `python3 -m py_compile scripts/sweep/sweep_weights_window1.py tests/test_sweep_weights_window1.py`
+  - `python3 -m unittest tests/test_sweep_weights_window1.py` -> `Ran 4 tests ... OK`
+  - `bash -n slurm/sweep/sweep_kf_w1_weights.sh`
+
+Interpretation:
+
+- 這次設定終於和人工問題完全對齊：
+  - 不是 tail mean
+  - 不是單次 crossing
+  - 也不是強迫每個 trial 都跑滿 `100000`
+- 它現在回答的是：
+  - 哪個 `data_weight` 最快**穩定**達標
+  - 並保留停下來那一點的 ckpt，供後續只對 winner 或 top trials 做追蹤
+
+Next:
+
+- 同步到 remote 並提交新的獨立 sweep job。
+
+### [2026-04-22] `3333` | submit fast-convergence `data_weight` sweep with `2e-5 / k=3 / 60 / 100000 upper bound`
+
+- Time: `2026-04-22 18:01 +0800`
+- Status: RUNNING
+- Experiment or Job ID: `3333`
+
+Change:
+
+- 將最新 [sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/scripts/sweep/sweep_weights_window1.py) 與 [sweep_kf_w1_weights.sh](/Users/latteine/Documents/coding/jaxpi/slurm/sweep/sweep_kf_w1_weights.sh) 同步到 remote `/home/junyi/jaxpi/`。
+- 直接提交新的 Slurm sweep job，使用獨立 study/storage：
+  - `STUDY_NAME=kf_w1_data_weight_sweep_5to80_thr2e5_k3_100k_stopckpt`
+  - `STORAGE=sqlite:///sweep_w1_data_5to80_thr2e5_k3_100k_stopckpt.db`
+
+Config / Dataset / Checkpoint:
+
+- Config: [paper_repro_soap_window1_ablation.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_window1_ablation.py)
+- Search space: `data_weight in [5, 80]` (`log=True`)
+- Objective: earliest stable crossing step of `max(ru,rv,rc)`
+- Stable criterion: `k = 3`
+- Threshold: `2e-5`
+- `N_trials = 60`
+- `Max_steps = 100000` (upper bound)
+- Checkpoint policy:
+  - one stop-point ckpt per completed trial
+  - remote root pattern: `/home/junyi/jaxpi/sweep_ckpts/trial_XXXX/time_window_1/`
+- Storage:
+  - `/home/junyi/jaxpi/sweep_w1_data_5to80_thr2e5_k3_100k_stopckpt.db`
+
+Evidence:
+
+- Remote sync:
+  - `rsync .../scripts/sweep/sweep_weights_window1.py -> /home/junyi/jaxpi/scripts/sweep/sweep_weights_window1.py`
+  - `rsync .../slurm/sweep/sweep_kf_w1_weights.sh -> /home/junyi/jaxpi/slurm/sweep/sweep_kf_w1_weights.sh`
+- Remote syntax validation:
+  - `python3 -m py_compile scripts/sweep/sweep_weights_window1.py`
+  - `bash -n slurm/sweep/sweep_kf_w1_weights.sh`
+- Submission:
+  - `sbatch slurm/sweep/sweep_kf_w1_weights.sh` -> `Submitted batch job 3333`
+- Queue:
+  - `3333 | sweep_kf_w1_weights | RUNNING | acmt20`
+- Stdout header:
+  - `Study    : kf_w1_data_weight_sweep_5to80_thr2e5_k3_100k_stopckpt`
+  - `N_trials : 60`
+  - `Max_steps: 100000`
+  - `Threshold: 2e-5`
+  - `Stable_k : 3`
+  - `Storage  : sqlite:///sweep_w1_data_5to80_thr2e5_k3_100k_stopckpt.db`
+
+Interpretation:
+
+- `3333` 是第一個正式對應「fastest stable convergence」研究問題的 `data_weight` sweep：
+  - 不是舊的 `5e-5`
+  - 不是 tail mean
+  - 也不會和 `3314/3318` 的舊 DB 汙染混在一起
+- 後續若要讀結果，應直接查這個新 study DB 與 `3333` log，而不是回頭引用舊 `3318` 的 `5e-5` threshold 結論。
+
+Next:
+
+- 等 `3333` 完成後，讀取新 DB 與 stdout，整理：
+  - 最佳 `data_weight`
+  - 最早穩定達標步數
+  - 哪些 trial 在 `100000` 內未達標
+
+### [2026-04-22] visualization | overlay `paper_dns_ref` and no-data `u/v` error curves
+
+- Time: `2026-04-22 18:25 +0800`
+- Status: COMPLETED
+- Experiment or Job ID: source no-data eval artifact `eval_paper_repro_soap_0405`
+
+Change:
+
+- 依人工要求，將 `paper_dns_ref` 內的：
+  - [kolmogorov_re1e6_u_error.csv](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/data/paper_dns_ref/kolmogorov_re1e6_u_error.csv)
+  - [kolmogorov_re1e6_v_error.csv](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/data/paper_dns_ref/kolmogorov_re1e6_v_error.csv)
+  與本地 no-data artifact [eval_paper_repro_soap_0405/l2_errors.npz](/Users/latteine/Documents/coding/jaxpi/eval_runs/eval_paper_repro_soap_0405/l2_errors.npz) 的連續 `u/v error` 曲線疊成同一張比較圖。
+- 新增可重跑腳本 [plot_paper_ref_vs_no_data_uv_error.py](/Users/latteine/Documents/coding/jaxpi/scripts/analysis/plot_paper_ref_vs_no_data_uv_error.py)。
+- 同步輸出 raw CSV 與 summary，避免只有圖沒有 provenance。
+
+Config / Dataset / Checkpoint:
+
+- Paper reference dir:
+  - [paper_dns_ref](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/data/paper_dns_ref)
+- No-data source:
+  - [l2_errors.npz](/Users/latteine/Documents/coding/jaxpi/eval_runs/eval_paper_repro_soap_0405/l2_errors.npz)
+- Output:
+  - [paper_ref_vs_no_data_uv_error.png](/Users/latteine/Documents/coding/jaxpi/eval_runs/paper_ref_vs_no_data_uv_error_20260422/paper_ref_vs_no_data_uv_error.png)
+  - [paper_ref_vs_no_data_uv_error.csv](/Users/latteine/Documents/coding/jaxpi/eval_runs/paper_ref_vs_no_data_uv_error_20260422/paper_ref_vs_no_data_uv_error.csv)
+  - [summary.txt](/Users/latteine/Documents/coding/jaxpi/eval_runs/paper_ref_vs_no_data_uv_error_20260422/summary.txt)
+
+Evidence:
+
+- `python3 -m py_compile scripts/analysis/plot_paper_ref_vs_no_data_uv_error.py`
+- `./.venv/bin/python scripts/analysis/plot_paper_ref_vs_no_data_uv_error.py`
+- Output summary:
+  - `paper_u_points = 30`
+  - `paper_v_points = 24`
+  - `no_data_points = 24`
+  - `paper_u_t_range = [0.0236, 4.9575]`
+  - `paper_v_t_range = [0.0168, 4.9499]`
+  - `no_data_t_range = [0.0000, 1.1500]`
+
+Interpretation:
+
+- 這張圖是把 paper reference 與我們自己的 no-data `u/v error` 直接疊圖比較，而不是做數值合併表。
+- 目前選用 `eval_paper_repro_soap_0405` 作為 no-data 來源，是因為這份 artifact 提供連續 `ts_all / eu_all / ev_all` 序列，能和 `paper_dns_ref` 的曲線形式直接對齊。
+- 這不等於「corrected direct all-window no-data baseline」；若後續要換成修正後的 direct 路徑，只能重畫較稀疏的 checkpoint / window-end 對照，而不是沿用這份連續曲線。
+
+Next:
+
+- 若人工要把這張圖拿來寫正式論證，下一步應明確決定：
+  - 是否接受 `eval_paper_repro_soap_0405` 作為 paper-style no-data 對照
+  - 或改用 corrected direct artifact 重畫較稀疏但更可信的 no-data 曲線
+
+### [2026-04-28] `3333 -> 3371` | mark stale running trial as fail and resume same sweep with 14-day limit
+
+- Time: `2026-04-28 15:42 +0800`
+- Status:
+  - `3333`: TIMEOUT
+  - `3371`: RUNNING
+- Experiment or Job ID: `3333`, `3371`
+
+Change:
+
+- 回查 `3333` 後確認：
+  - `3333` 在 `2026-04-25 10:00:21 +0800` 因 Slurm time limit 被取消
+  - study DB 中 `trial_id=15`（Optuna `number=14`）殘留為 `RUNNING`
+- 依人工要求：
+  - 將殘留 `trial 15` 從 `RUNNING` 改成 `FAIL`
+  - 將 [sweep_kf_w1_weights.sh](/Users/latteine/Documents/coding/jaxpi/slurm/sweep/sweep_kf_w1_weights.sh) 的 Slurm time limit 從 `72:00:00` 改成 `14-00:00:00`
+- 續跑時沿用同一個 study/storage，不另開新 DB，但為避免把總 trial 數從 `15` 直接加到 `75`，這次以 `N_TRIALS=45` 續跑，讓總 trial 數補到原先目標 `60`。
+- 將更新後的 Slurm script 同步到 remote，並提交續跑 job `3371`。
+
+Config / Dataset / Checkpoint:
+
+- Study:
+  - `kf_w1_data_weight_sweep_5to80_thr2e5_k3_100k_stopckpt`
+- Storage:
+  - `sqlite:///sweep_w1_data_5to80_thr2e5_k3_100k_stopckpt.db`
+- Sweep settings unchanged:
+  - `data_weight in [5, 80]` (`log=True`)
+  - `threshold = 2e-5`
+  - `stable_reports = 3`
+  - stop-point ckpt only
+- Resume submission override:
+  - `N_TRIALS=45`
+- New Slurm time limit:
+  - `14-00:00:00`
+
+Evidence:
+
+- `3333` final Slurm status:
+  - `3333 | sweep_kf_w1_weights | TIMEOUT | 3-00:00:18 | ExitCode=0:0`
+  - stdout tail:
+    - `*** JOB 3333 ON acmt20 CANCELLED AT 2026-04-25T10:00:21 DUE TO TIME LIMIT ***`
+- DB cleanup:
+  - before: `(15, 14, 'RUNNING', '2026-04-25 05:47:17.551526', None)`
+  - after : `(15, 14, 'FAIL', '2026-04-25 05:47:17.551526', '2026-04-28 15:42:34.350752')`
+- Script validation:
+  - `bash -n slurm/sweep/sweep_kf_w1_weights.sh`
+- Remote sync:
+  - `rsync .../slurm/sweep/sweep_kf_w1_weights.sh -> /home/junyi/jaxpi/slurm/sweep/sweep_kf_w1_weights.sh`
+- Resume submission:
+  - `cd /home/junyi/jaxpi && N_TRIALS=45 sbatch slurm/sweep/sweep_kf_w1_weights.sh`
+  - `Submitted batch job 3371`
+- `3371` header:
+  - `Study    : kf_w1_data_weight_sweep_5to80_thr2e5_k3_100k_stopckpt`
+  - `N_trials : 45`
+  - `Max_steps: 100000`
+  - `Threshold: 2e-5`
+  - `Stable_k : 3`
+- Slurm time limit check:
+  - `TimeLimit=14-00:00:00`
+- DB after resume:
+  - `trial_id=16` / `number=15` is `RUNNING`
+
+Interpretation:
+
+- `3333` 本身沒有完成；目前可引用的已完成 trial 只有前 `14` 個，best 仍是：
+  - `trial 7` / `data_weight=6.092663599129069` / `value=95700`
+- `trial 15` 的殘留 `RUNNING` 狀態若不先清掉，後續 study 會保持髒狀態；這次已清理成 `FAIL`，續跑路徑現在是乾淨的。
+- `3371` 已正確沿用原 study/storage 並從下一個新 trial 接續，不會把前面已完成 trial 覆蓋掉，也不會額外多跑到超過原先規劃的總 trial 數。
+
+Next:
+
+- 等 `3371` 持續產出 trial 後，優先回報：
+  - 新 best 是否超過 `95700`
+  - 是否有更多 trial 在 `100000` 內穩定達標
+
+### [2026-05-02] `3371 -> 3400` | relax fast-convergence sweep to `5e-5 / k=3` and restart on new study
+
+- Time: `2026-05-02 17:22 +0800`
+- Status:
+  - `3371`: CANCELLED
+  - `3399`: CANCELLED
+  - `3400`: RUNNING
+- Experiment or Job ID: `3371`, `3399`, `3400`
+
+Change:
+
+- 人工確認目前 `2e-5 / k=3` 的 stable-crossing 標準過嚴，太多 trial 直接卡在 `100000` ceiling，Optuna 排名解析度不足。
+- 將 window-1 fast-convergence sweep 的 success criterion 放寬為：
+  - `threshold = 5e-5`
+  - `stable_reports = 3`
+- 保留其他主幹設定不變：
+  - `data_weight in [5, 80]` (`log=True`)
+  - `max_steps = 100000`
+  - stop-point / final-point single ckpt
+  - `PatientPruner(MedianPruner(...), patience=25, min_delta=1e-5)`
+- 因研究問題已改，停止舊的 `3371` (`2e-5`)。
+- 首次重送為 `3399`，但 remote job header 仍吃到舊 `2e-5` study/storage，立即取消。
+- 之後用顯式環境變數覆寫 `THRESHOLD / STUDY_NAME / STORAGE / N_TRIALS / MAX_STEPS / STABLE_REPORTS` 重新提交 `3400`，確認新 job 已正確使用 `5e-5 / k=3` 新 study。
+
+Config / Dataset / Checkpoint:
+
+- Local script defaults:
+  - [sweep_weights_window1.py](/Users/latteine/Documents/coding/jaxpi/scripts/sweep/sweep_weights_window1.py)
+    - `DEFAULT_THRESHOLD = 5e-5`
+    - `DEFAULT_STABLE_REPORTS = 3`
+    - `DEFAULT_MAX_STEPS = 100000`
+    - `DATA_WEIGHT_MIN = 5.0`
+    - `DATA_WEIGHT_MAX = 80.0`
+- Slurm wrapper defaults:
+  - [sweep_kf_w1_weights.sh](/Users/latteine/Documents/coding/jaxpi/slurm/sweep/sweep_kf_w1_weights.sh)
+    - `#SBATCH --time=14-00:00:00`
+    - `THRESHOLD=5e-5`
+    - `STABLE_REPORTS=3`
+    - `N_TRIALS=60`
+    - `MAX_STEPS=100000`
+    - `STUDY_NAME=kf_w1_data_weight_sweep_5to80_thr5e5_k3_100k_stopckpt`
+    - `STORAGE=sqlite:///sweep_w1_data_5to80_thr5e5_k3_100k_stopckpt.db`
+- New remote study:
+  - `kf_w1_data_weight_sweep_5to80_thr5e5_k3_100k_stopckpt`
+- New remote storage:
+  - `sqlite:///sweep_w1_data_5to80_thr5e5_k3_100k_stopckpt.db`
+
+Evidence:
+
+- Local code grep:
+  - `DEFAULT_THRESHOLD = 5e-5`
+  - `DEFAULT_STABLE_REPORTS = 3`
+  - `DEFAULT_MAX_STEPS = 100000`
+  - `threshold: 5e-05`
+- Local wrapper grep:
+  - `#SBATCH --time=14-00:00:00`
+  - `THRESHOLD=\"${THRESHOLD:-5e-5}\"`
+  - `STUDY_NAME=\"${STUDY_NAME:-kf_w1_data_weight_sweep_5to80_thr5e5_k3_100k_stopckpt}\"`
+  - `STORAGE=\"${STORAGE:-sqlite:///sweep_w1_data_5to80_thr5e5_k3_100k_stopckpt.db}\"`
+- Local validation:
+  - `python3 -m py_compile scripts/sweep/sweep_weights_window1.py tests/test_sweep_weights_window1.py`
+  - `bash -n slurm/sweep/sweep_kf_w1_weights.sh`
+- Old run stopped:
+  - `scancel 3371`
+- Wrong restart stopped:
+  - `scancel 3399`
+- Correct restart:
+  - `THRESHOLD=5e-5 STABLE_REPORTS=3 N_TRIALS=60 MAX_STEPS=100000 STUDY_NAME=kf_w1_data_weight_sweep_5to80_thr5e5_k3_100k_stopckpt STORAGE=sqlite:///sweep_w1_data_5to80_thr5e5_k3_100k_stopckpt.db sbatch slurm/sweep/sweep_kf_w1_weights.sh`
+  - `Submitted batch job 3400`
+- Remote `3400` header:
+  - `Study    : kf_w1_data_weight_sweep_5to80_thr5e5_k3_100k_stopckpt`
+  - `N_trials : 60`
+  - `Max_steps: 100000`
+  - `Threshold: 5e-5`
+  - `Stable_k : 3`
+  - `Storage  : sqlite:///sweep_w1_data_5to80_thr5e5_k3_100k_stopckpt.db`
+- Remote queue:
+  - `3400 | sweep_kf_w1_weights | RUNNING | acmt20`
+- Remote DB probe:
+  - `db_exists True`
+  - `[(1, 0, 'RUNNING')]`
+
+Interpretation:
+
+- 先前 `2e-5 / k=3` 的 objective 比較像 hard success line，不適合第一輪 sweep 排名；放寬到 `5e-5 / k=3` 後，trial 間的 crossing-time 解析度應明顯提高。
+- `3399` 證明光改 remote 檔案還不足以保證 sbatch 當下吃到正確參數；這次用顯式 env override 重送 `3400` 後，header 與 DB 都已證明新 study 正確起跑。
+- 之後關於 fast-convergence 的正式追蹤對象應改為 `3400`，不再沿用 `3371` 的 `2e-5` lineage。
+
+Next:
+
+- 觀察 `3400` 前幾個 completed trials 是否仍大量卡在 `100000`，用來判斷 `5e-5 / k=3` 是否已提供足夠 ranking 解析度。
+- 若 `3400` 仍有大量 ceiling ties，再考慮是否需要把 objective 改成更連續的 convergence score，而不是再硬壓更嚴 threshold。

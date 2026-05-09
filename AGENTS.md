@@ -89,6 +89,11 @@
   - schedule-free / grad clip / adaptive weighting 必須和目標 baseline 對齊
 - Eval_Consistency:
   - eval mode 必須與訓練 checkpoint 的 window / state 定義一致
+- Metric_Selection:
+  - `loss` 只能作為 `health/progress signal`：用來判斷是否發散、停滯、進入平台或值得 early-stop 候選
+  - `corrected field error` 才能作為 `selection signal`：用來判斷 checkpoint / run 是否真的更好
+  - 禁止把 residual threshold crossing、tail loss 或 loss rank 直接當成 field quality 證據
+  - 若 `loss` 與 `error` 趨勢衝突，研究結論必須以 `corrected field error` 為準
 </CORE_RESEARCH_INTEGRITY>
 
 <TIME_WINDOW_INTEGRITY_CHECK>
