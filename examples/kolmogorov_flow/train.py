@@ -327,7 +327,15 @@ def train_one_window(
                 },
             )
         out_shardings = replicated_sharding
-        jit_step = jit(_jit_step, in_shardings=in_shardings, out_shardings=out_shardings)
+        # donate_argnums=(0,) 允許 XLA 重用 state buffer，省一次 state 大小的 HBM 配置；
+        # 純記憶體別名優化，計算結果 bit-identical。安全前提：呼叫端
+        # `model.state = jit_step(model.state, ...)` 立即覆蓋舊 reference（已符合）。
+        jit_step = jit(
+            _jit_step,
+            in_shardings=in_shardings,
+            out_shardings=out_shardings,
+            donate_argnums=(0,),
+        )
 
         def _jit_update_weights(state, batch):
             weights = model.compute_weights(state.params, batch)
@@ -337,11 +345,13 @@ def train_one_window(
             _jit_update_weights,
             in_shardings=in_shardings,
             out_shardings=out_shardings,
+            donate_argnums=(0,),
         )
     else:
         # Why: 單卡模式必須顯式 jit，否則 SOAP lax.cond 兩個 branch 無法 operator-fuse，
         #      導致第一步 XLA 編譯時間爆增（數小時）。Multi-device 路徑已有 jit wrapper。
-        jit_step = jit(_jit_step)
+        # donate_argnums=(0,) 同樣套用，回收 state buffer，計算結果不變。
+        jit_step = jit(_jit_step, donate_argnums=(0,))
         jit_update_weights = None  # 單卡 weight update 走 line 383-384 的 eager 路徑
 
     if num_devices > 1:
