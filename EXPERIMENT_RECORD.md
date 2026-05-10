@@ -15,6 +15,22 @@
 
 ## [INDEX] Active Experiments
 
+### `3480` | `re1e6_n512_ds4_soap_sensor100_w50_w1_dw38_eval`
+
+| Field | Value |
+| :--- | :--- |
+| Status | Running (`2026-05-11 03:54 +0800`) on `acmt20` |
+| Config | [paper_repro_soap_sensor100_n512_w50_window1_dw38_eval.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_dw38_eval.py) |
+| Dataset | [kolmogorov_Re1e6_N512_T5_ds4.npy](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/data/kolmogorov_dns/kolmogorov_Re1e6_N512_T5_ds4.npy) |
+| Sensor Constraint | `QR-pivot K100` + fixed `u_data=v_data=38.0614` + `w_data=0` |
+| Time Horizon | `window 1` only, `max_steps=50000` |
+| Checkpoint Policy | `save_every_steps=1000`, `num_keep_ckpts=None` |
+| Launch Script | `/home/junyi/jaxpi/slurm/train/train_kolmogorov_re1e6_sensor100_w25_soap.sh` with overridden `CONFIG_PATH` and `RUN_SLUG` |
+| Workdir | `/home/junyi/jaxpi/runs/train_kf_w50_w1_dw38_eval_3480` |
+| Purpose | Validate `3400` sweep rank-1 `data_weight=38.0614` (first_stable_step=49,400 under 5e-5/k=3 scoring) on **corrected field error**. Direct comparison target: no-data window-1 trajectory (existing `re1e6_n512_ds4_soap_w1_ablation`, 10k-step ckpt density) — answer whether sensor data both accelerates convergence and reaches the same accuracy as no-data. |
+| Current Risk | sweep score is residual health signal only, not field quality; the 60-trial `3400` first_stable_step range was 49,400~55,400 (12% spread) → **expect very small improvement over `dw=23.1429`** (3324) on field error. If `dw=38.0614` does not visibly accelerate against no-data baseline either, the AGENTS.md `Metric_Selection` red line gets a concrete cautionary tale. |
+| RNG Strategy | Not recorded |
+
 ### `3324` | `re1e6_n512_ds4_soap_sensor100_w50_w1_dw231429_eval`
 
 | Field | Value |
