@@ -15,20 +15,42 @@
 
 ## [INDEX] Active Experiments
 
-### `3480` | `re1e6_n512_ds4_soap_sensor100_w50_w1_dw38_eval`
+### `3491` | `re1e6_n512_ds4_soap_sensor100_w50_w1_dw38_100k_eval`
 
 | Field | Value |
 | :--- | :--- |
-| Status | Running (`2026-05-11 03:54 +0800`) on `acmt20` |
+| Status | Running (`2026-05-13 12:13 +0800`) on `acmt20`, 2x RTX 3090 (sharding) |
+| Config | [paper_repro_soap_sensor100_n512_w50_window1_dw38_100k_eval.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_dw38_100k_eval.py) |
+| Dataset | [kolmogorov_Re1e6_N512_T5_ds4.npy](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/data/kolmogorov_dns/kolmogorov_Re1e6_N512_T5_ds4.npy) |
+| Sensor Constraint | `QR-pivot K100` + fixed `u_data=v_data=38.0614` + `w_data=0` |
+| Time Horizon | `window 1` only, `max_steps=100000` |
+| Checkpoint Policy | `save_every_steps=1000`, `num_keep_ckpts=None` (100 ckpts total) |
+| Workdir | `/home/junyi/jaxpi/runs/train_kf_w50_w1_dw38_100k_eval_3491` |
+| Ckpt Root | `/home/junyi/jaxpi/re1e6_n512_ds4_soap_sensor100_w50_w1_dw38_100k_eval/ckpt` |
+| Wandb | offline run `t3liqvqw`, group `re1e6_window1_fixed_weight_eval` |
+| Predecessor | `3481` (50k) + eval `3489/3490` — sensor 50k 達到 ~no_data 60k 精度，未達 no_data 100k；本實驗將 sensor 延伸到 100k 步驗證是否存在後期加速效應 |
+| Purpose | 回答「sensor 是否在 100k 步上能超越 no-data 100k baseline」 |
+| Expected outcome | 若 sensor 100k 仍 ≈ no_data 100k → sparse sensor 對 window-1 確認沒有 measurable 加速；若 sensor 100k 顯著贏 → 存在後期效應但需要更長訓練 |
+| RNG Strategy | Not recorded |
+
+### `3481` | `re1e6_n512_ds4_soap_sensor100_w50_w1_dw38_eval`
+
+| Field | Value |
+| :--- | :--- |
+| Status | Completed (`2026-05-11 10:27 +0800`, Elapsed `03:12:17`) on `acmt20`, 2x RTX 3090 (sharding) |
 | Config | [paper_repro_soap_sensor100_n512_w50_window1_dw38_eval.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_dw38_eval.py) |
 | Dataset | [kolmogorov_Re1e6_N512_T5_ds4.npy](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/data/kolmogorov_dns/kolmogorov_Re1e6_N512_T5_ds4.npy) |
 | Sensor Constraint | `QR-pivot K100` + fixed `u_data=v_data=38.0614` + `w_data=0` |
 | Time Horizon | `window 1` only, `max_steps=50000` |
-| Checkpoint Policy | `save_every_steps=1000`, `num_keep_ckpts=None` |
-| Launch Script | `/home/junyi/jaxpi/slurm/train/train_kolmogorov_re1e6_sensor100_w25_soap.sh` with overridden `CONFIG_PATH` and `RUN_SLUG` |
-| Workdir | `/home/junyi/jaxpi/runs/train_kf_w50_w1_dw38_eval_3480` |
-| Purpose | Validate `3400` sweep rank-1 `data_weight=38.0614` (first_stable_step=49,400 under 5e-5/k=3 scoring) on **corrected field error**. Direct comparison target: no-data window-1 trajectory (existing `re1e6_n512_ds4_soap_w1_ablation`, 10k-step ckpt density) — answer whether sensor data both accelerates convergence and reaches the same accuracy as no-data. |
-| Current Risk | sweep score is residual health signal only, not field quality; the 60-trial `3400` first_stable_step range was 49,400~55,400 (12% spread) → **expect very small improvement over `dw=23.1429`** (3324) on field error. If `dw=38.0614` does not visibly accelerate against no-data baseline either, the AGENTS.md `Metric_Selection` red line gets a concrete cautionary tale. |
+| Checkpoint Policy | `save_every_steps=1000`, `num_keep_ckpts=None` (50 ckpts saved) |
+| Workdir | `/home/junyi/jaxpi/runs/train_kf_w50_w1_dw38_eval_3481` |
+| Ckpt Root | `/home/junyi/jaxpi/re1e6_n512_ds4_soap_sensor100_w50_w1_dw38_eval/ckpt` (50 ckpts, 1k~50k 每 1000 步) |
+| Wandb | offline run `vdxcohw7`, group `re1e6_window1_fixed_weight_eval` |
+| Predecessor | `3480` failed after 53s with transient pypi DNS error during uv build on `acmt20`; pre-warmed uv cache on login node then resubmitted as `3481` |
+| Eval Jobs | `3489` (5-pt head-to-head 10k~50k), `3490` (10-pt with no_data 10k~100k + sensor 10k~50k via `--allow-missing`) |
+| Result @ step 50000 (direct apply_fn) | `u=1.208e-3, v=1.113e-3, w=0.825e-3` — **same level as no_data 50k (1.141e-3, 1.203e-3, 0.822e-3)**, but **falls short of no_data 100k (1.077e-3, 1.088e-3, 0.704e-3)** by 12~17% on u/w |
+| Sensor-vs-no_data verdict (50k) | NO measurable acceleration; sensor 50k ≈ no_data 60k accuracy; direct contradiction with sweep 3400 residual ranking (`dw=38.0614` was rank-1 first_stable_step=49,400) — concrete evidence for AGENTS.md `Metric_Selection` red line |
+| Followup | `3491` extends sensor to 100k to test whether the gap closes in late training |
 | RNG Strategy | Not recorded |
 
 ### `3324` | `re1e6_n512_ds4_soap_sensor100_w50_w1_dw231429_eval`
@@ -315,6 +337,121 @@
 - 2026-04-20 已把這兩類假設集中到共用 helper，並要求 config 顯式宣告 `expected_time_remainder`，否則 eval 直接 fail-fast。
 
 ## [LOG] Chronological
+
+### [2026-05-13] `3491` | submit dw=38.06 100k-step extension training
+
+- Time: `2026-05-13 12:13 +0800`
+- Status: RUNNING on `acmt20`
+- Experiment or Job ID: `3491`
+
+Change:
+
+- Created [paper_repro_soap_sensor100_n512_w50_window1_dw38_100k_eval.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_dw38_100k_eval.py): clone of `3481` config with `max_steps=100000` to test late-training behavior.
+- Pre-warmed `uv sync` on login node to avoid the DNS-build failure that killed `3480` on first attempt.
+- `sbatch --export=ALL,CONFIG_PATH=...,RUN_SLUG=train_kf_w50_w1_dw38_100k_eval slurm/train/train_kolmogorov_re1e6_sensor100_w25_soap.sh` → job `3491`.
+
+Evidence:
+
+- Config test `tests/test_window1_dw38_100k_eval_config.py` PASS — pins `max_steps=100000`, `save_every_steps=1000`, `num_keep_ckpts=None`, `u_data=v_data=38.0614`.
+- Job log shows correct config loaded, 2-GPU sharding active, wandb tags include `max_steps_100k` and `sweep_3400_rank1`, `Training time window 1` started.
+
+Interpretation:
+
+- `3481` (50k) eval already showed sensor matches no_data 50k but falls short of no_data 100k by 12~17% (u/w). The 100k extension answers whether the gap is structural (sensor can't surpass no_data even with same training budget) or just under-trained.
+- If `3491` ckpt_100000 still ≈ no_data ckpt_100000 → conclude that sparse QR-pivot K=100 sensor with `dw=38.06` provides no measurable benefit for window-1 corrected field error, despite topping the residual-based sweep.
+
+Next:
+
+- Wait ~6.5 h for `3491` to complete (50k → 100k ratio).
+- After completion: rerun the 10-pt dual eval with sensor extended to 10k~100k, observe whether sensor catches up to or surpasses no_data 100k.
+
+### [2026-05-13] `3490` | 10-point dual eval (dw=38 vs no_data, 10k~100k with allow-missing)
+
+- Time: `2026-05-13 19:48 ~ 20:03 +0800`
+- Status: COMPLETED (Elapsed `00:14:50`)
+- Experiment or Job ID: `3490` (postprocess)
+
+Change:
+
+- `sbatch` `slurm/postprocess/postprocess_kolmogorov_window1_checkpoint_sweep.sh` with `CHECKPOINT_STEPS=10000,...,100000` and `ALLOW_MISSING=1`.
+- no_data side ran all 10 ckpts (10k~100k); sensor side skipped 60k~100k (not yet trained at that point).
+
+Evidence:
+
+- Output: [eval_runs/dw38_vs_nodata_w1_10pt_20260511/](/Users/latteine/Documents/coding/jaxpi/eval_runs/dw38_vs_nodata_w1_10pt_20260511/)
+- CSV `checkpoint_sweep_results.csv` (15 rows: 10 no_data + 5 sensor)
+- `checkpoint_sweep_error_vs_step.png` shows three subplots overlapping for u/v/w; no_data extends past sensor's 50k cutoff.
+
+Headline numbers (window 1, t_local=0.05, direct apply_fn, relative L2):
+
+| run     | step    | u_err     | v_err     | w_err     |
+| ------- | ------: | --------: | --------: | --------: |
+| no_data |  10 000 | 1.805e-3  | 1.693e-3  | 2.583e-3  |
+| no_data |  50 000 | 1.141e-3  | 1.203e-3  | 0.822e-3  |
+| no_data | 100 000 | **1.077e-3**  | **1.088e-3**  | **0.704e-3**  |
+| sensor  |  50 000 | 1.208e-3  | 1.113e-3  | 0.825e-3  |
+
+Interpretation:
+
+- sensor 50k ≈ no_data 60k accuracy on all three components (`1.22e-3, 1.11e-3, 0.80e-3` vs sensor `1.21e-3, 1.11e-3, 0.82e-3`).
+- no_data continues to improve from 50k to 100k by ~15~17% on u/w (1.14e-3 → 1.08e-3, 0.82e-3 → 0.70e-3); v plateau ~1.1e-3.
+- sensor at its 50k endpoint is **not** at no_data 100k accuracy — falls short by 12% (u), 2% (v), 17% (w).
+- ⚠️ **direct contradiction with sweep 3400 residual ranking**: sweep ranked `dw=38.06` rank-1 by residual `max(ru,rv,rc) < 5e-5`, yet on corrected field error the sensor run has no advantage over no_data at any matched step, and is **behind** when no_data trains longer. Per AGENTS.md `Metric_Selection` red line, residual ≠ field quality.
+
+Next:
+
+- Sensor 100k extension submitted as `3491`.
+
+### [2026-05-13] `3489` | 5-point dual eval (dw=38 vs no_data, head-to-head 10k~50k)
+
+- Time: `2026-05-13 19:27 ~ 19:37 +0800`
+- Status: COMPLETED (Elapsed `00:10:07`)
+- Experiment or Job ID: `3489` (postprocess)
+
+Change:
+
+- First eval after `3481` finished. `CHECKPOINT_STEPS=10000,20000,30000,40000,50000`, both runs.
+- Output: [eval_runs/dw38_vs_nodata_w1_5pt_20260511/](/Users/latteine/Documents/coding/jaxpi/eval_runs/dw38_vs_nodata_w1_5pt_20260511/)
+
+Evidence:
+
+- CSV: 10 rows (5 no_data + 5 sensor).
+- All 5 matched-step deltas within ±10%; largest sensor advantage was `v_err` at step 20k (1.20e-3 vs 1.44e-3, -16.2%) but did not persist.
+- Vorticity field PNGs show visually indistinguishable PINN reconstruction and `|Error|` maps at every step for both runs.
+
+Interpretation:
+
+- Same-step head-to-head shows no acceleration. Promoted to 10-pt eval `3490` to compare against no_data 100k full horizon.
+
+Next:
+
+- Drove `3490` (10-pt + allow_missing).
+
+### [2026-05-11] `3481` | dw=38.06 fixed-weight 50k training completed
+
+- Time: `2026-05-11 07:15 ~ 10:27 +0800`
+- Status: COMPLETED (Elapsed `03:12:17`, ExitCode `0`)
+- Experiment or Job ID: `3481`
+
+Change:
+
+- Created [paper_repro_soap_sensor100_n512_w50_window1_dw38_eval.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_dw38_eval.py): clone of `dw231429_eval` pattern with `u_data=v_data=38.0614` (sweep 3400 rank-1).
+- Fixed 13 slurm launchers missing `SLURM_SUBMIT_DIR` fallback for `SCRIPT_DIR` (commit `5a35edc`) — root cause of `3479` early FAIL.
+- Pre-warmed uv cache on login node after `3480` failed with transient pypi DNS error.
+
+Evidence:
+
+- 50 ckpts written to `/home/junyi/jaxpi/re1e6_n512_ds4_soap_sensor100_w50_w1_dw38_eval/ckpt/time_window_1/` (step 1000 ~ 50000, 1k cadence).
+- Training stdout shows clean shutdown; final ckpt at step 50000 saved at 10:27:27.
+- Note: ckpt path uses `wandb.name` not `RUN_SLUG`-based workdir — this is train.py default behavior.
+
+Interpretation:
+
+- Training itself converged successfully. Field-quality interpretation requires the eval jobs `3489`/`3490` (next entries chronologically above).
+
+Next:
+
+- Eval submitted as `3489`.
 
 ### [2026-04-21] `3324` | submit fixed-weight window-1 checkpoint-validation run
 
