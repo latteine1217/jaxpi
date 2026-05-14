@@ -477,7 +477,24 @@ class KolmogorovLES:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Kolmogorov 2D LES")
-    parser.add_argument("--dns", type=str, required=True, help="DNS NPY 檔案路徑")
+    parser.add_argument("--dns", type=str, default=None,
+                        help="DNS NPY 檔案路徑（除非 --no_dns 否則必填）")
+    parser.add_argument("--no_dns", action="store_true",
+                        help="Stand-alone 模式：不讀 DNS reference；需搭配 --manual_* 參數")
+    parser.add_argument("--manual_L", type=float, default=1.0,
+                        help="Stand-alone：domain size L (預設 1.0，對齊 PINN code)")
+    parser.add_argument("--manual_nu", type=float, default=None,
+                        help="Stand-alone：viscosity nu；--no_dns 必填")
+    parser.add_argument("--manual_A", type=float, default=0.1,
+                        help="Stand-alone：forcing amplitude (預設 0.1)")
+    parser.add_argument("--manual_k_f", type=int, default=2,
+                        help="Stand-alone：forcing wavenumber (預設 2)")
+    parser.add_argument("--manual_turnover_time", type=float, default=None,
+                        help="Stand-alone：先驗 turnover time T_eddy；--no_dns 必填")
+    parser.add_argument("--manual_speed_bound", type=float, default=None,
+                        help="Stand-alone：CFL 用速度上界；預設 2·sqrt(A/(k_f·2π))")
+    parser.add_argument("--manual_omega_rms", type=float, default=None,
+                        help="Stand-alone：初始 vorticity RMS；預設由 forcing-friction 平衡推估")
     parser.add_argument("--N", type=int, default=256, help="LES 解析度")
     parser.add_argument("--T_end", type=float, default=20.0, help="模擬總時間")
     parser.add_argument("--save_interval", type=int, default=100, help="輸出間隔")
@@ -505,6 +522,16 @@ def main() -> None:
     parser.add_argument("--output", type=str, required=True, help="輸出 NPY 檔案")
 
     args = parser.parse_args()
+
+    if not args.no_dns and args.dns is None:
+        parser.error("--dns is required unless --no_dns is given")
+    if args.no_dns:
+        if args.manual_nu is None:
+            parser.error("--no_dns requires --manual_nu")
+        if args.manual_turnover_time is None:
+            parser.error("--no_dns requires --manual_turnover_time")
+        if args.init_mode == "dns":
+            parser.error("--no_dns is incompatible with --init_mode dns")
 
     dns_path = Path(args.dns)
     dns_data = load_npy_payload(dns_path)
