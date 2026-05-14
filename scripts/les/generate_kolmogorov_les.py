@@ -533,19 +533,54 @@ def main() -> None:
         if args.init_mode == "dns":
             parser.error("--no_dns is incompatible with --init_mode dns")
 
-    dns_path = Path(args.dns)
-    dns_data = load_npy_payload(dns_path)
-    dns_config = resolve_dns_config(dns_data)
+    if args.no_dns:
+        # Stand-alone calibration from Kolmogorov forcing-friction balance.
+        dns_path = None
+        dns_config = {
+            "L": args.manual_L,
+            "nu": args.manual_nu,
+            "A": args.manual_A,
+            "k_f": args.manual_k_f,
+            "dt": args.dt if args.dt is not None else 1e-4,
+            "N": args.N,
+        }
+        turnover_time = args.manual_turnover_time
+        r_fric = 1.0 / (args.r_scale * turnover_time)
 
-    turnover_time = estimate_turnover_time(dns_data)
-    r_fric = 1.0 / (args.r_scale * turnover_time)
+        if args.manual_omega_rms is not None:
+            dns_omega_rms = args.manual_omega_rms
+        else:
+            dns_omega_rms = float(np.sqrt(
+                2.0 * args.manual_A * args.manual_k_f
+                    * args.r_scale * turnover_time
+            ))
+        omega_rms = args.omega_rms if args.omega_rms is not None else dns_omega_rms
 
-    dns_omega_rms = estimate_dns_omega_rms(dns_data)
-    omega_rms = args.omega_rms if args.omega_rms is not None else dns_omega_rms
-    dns_speed_bound, dns_speed_rms = estimate_dns_velocity_scale(dns_data)
-    dns_omega_init = prepare_dns_initial_omega(dns_data, args.N) if args.init_mode == "dns" else None
-    if args.omega_rms is None and dns_omega_init is not None:
-        omega_rms = float(np.sqrt(np.mean(dns_omega_init**2)))
+        if args.manual_speed_bound is not None:
+            dns_speed_bound = args.manual_speed_bound
+        else:
+            dns_speed_bound = 2.0 * float(np.sqrt(
+                args.manual_A / (args.manual_k_f * 2.0 * np.pi)
+            ))
+        dns_speed_rms = 0.5 * dns_speed_bound
+
+        dns_omega_init = None
+        calibration_mode = "stand_alone"
+    else:
+        dns_path = Path(args.dns)
+        dns_data = load_npy_payload(dns_path)
+        dns_config = resolve_dns_config(dns_data)
+
+        turnover_time = estimate_turnover_time(dns_data)
+        r_fric = 1.0 / (args.r_scale * turnover_time)
+
+        dns_omega_rms = estimate_dns_omega_rms(dns_data)
+        omega_rms = args.omega_rms if args.omega_rms is not None else dns_omega_rms
+        dns_speed_bound, dns_speed_rms = estimate_dns_velocity_scale(dns_data)
+        dns_omega_init = prepare_dns_initial_omega(dns_data, args.N) if args.init_mode == "dns" else None
+        if args.omega_rms is None and dns_omega_init is not None:
+            omega_rms = float(np.sqrt(np.mean(dns_omega_init**2)))
+        calibration_mode = "dns_calibrated"
 
     dt = args.dt if args.dt is not None else dns_config["dt"]
     if args.nu_h is None:
@@ -599,7 +634,7 @@ def main() -> None:
     spectrum_snapshots = []
 
     logging.info("=== LES 開始 ===")
-    logging.info(f"DNS: {dns_path}")
+    logging.info(f"DNS: {dns_path if dns_path is not None else '<stand_alone>'}")
     logging.info(f"LES N={args.N}, T_end={args.T_end}, dt={dt}")
     logging.info(f"nu_h={nu_h:.3e}, r={r_fric:.3e}, r_scale={args.r_scale}")
     logging.info(f"omega_rms={omega_rms:.3e}, cfl_target={args.cfl_target}")
@@ -700,9 +735,10 @@ def main() -> None:
             "seed": args.seed,
             "init_mode": args.init_mode,
             "model": "LES",
-            "dns_source": str(dns_path),
+            "dns_source": str(dns_path) if dns_path is not None else None,
             "dealias_mode": args.dealias_mode,
             "backend": "numpy",
+            "calibration_mode": calibration_mode,
         },
     }
 

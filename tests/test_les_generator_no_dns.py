@@ -102,3 +102,40 @@ def test_no_dns_init_mode_dns_rejected(tmp_path):
     )
     combined = (result.stderr + result.stdout).lower()
     assert "init_mode" in combined and "dns" in combined
+
+
+import numpy as np
+
+
+def test_no_dns_smoke_run(tmp_path):
+    """Tiny stand-alone run completes and produces a npy with
+    calibration_mode='stand_alone' and matching manual params."""
+    out = tmp_path / "smoke.npy"
+    _run(
+        "--no_dns",
+        "--manual_L", "1.0",
+        "--manual_nu", "1e-4",          # higher nu for stability at tiny N
+        "--manual_A", "0.1",
+        "--manual_k_f", "2",
+        "--manual_turnover_time", "1.0",
+        "--N", "16", "--T_end", "0.01",
+        "--dt", "1e-4",
+        "--save_interval", "50",
+        "--seed", "42",
+        "--output", str(out),
+        timeout=120,
+    )
+    payload = np.load(out, allow_pickle=True).item()
+    assert "config" in payload
+    cfg = payload["config"]
+    assert cfg["calibration_mode"] == "stand_alone"
+    assert cfg["N"] == 16
+    assert cfg["nu"] == 1e-4
+    assert cfg["L"] == 1.0
+    assert cfg["A"] == 0.1
+    assert cfg["k_f"] == 2
+    # Sanity: omega field exists with expected shape.
+    assert "omega" in payload
+    omega = np.asarray(payload["omega"])
+    assert omega.ndim == 3
+    assert omega.shape[1:] == (16, 16)
