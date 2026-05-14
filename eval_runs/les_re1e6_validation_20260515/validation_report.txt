@@ -1,0 +1,11 @@
+=== LES validation report ===
+input: output/kolmogorov_les_Re1e6_N512_T5.npy
+calibration_mode: stand_alone
+N=512, T_end=5.0, nu=1e-06, A=0.1, k_f=2
+
+[check1 KE no-decay+bounded] KE(0)=3.1475e-04, KE(T)=3.6960e-02, max(KE)=3.6960e-02, mean(t≥1)=1.7727e-02 | no-decay=True, bounded(<100.0)=True, finite=True → PASS
+[check2 enstrophy] max |Z| = 35.1, all finite = True → PASS
+[check3 spectrum slope] slope over k∈[4.0, 128.0] = -3.670 target [-4.0, -1.0] → PASS
+[check4 divergence] max|div| = 3.50e-13 target < 1e-06 → PASS
+
+=== overall hard-check verdict: PASS ===
