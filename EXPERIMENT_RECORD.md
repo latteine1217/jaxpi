@@ -341,6 +341,31 @@
 
 ## [LOG] Chronological
 
+### [2026-05-14] sub-project A | LES generator stand-alone mode landed
+
+- Time: `2026-05-14`
+- Status: ready for deployment to home-gpu
+- Experiment or Job ID: n/a (tooling change, no slurm)
+
+Change:
+
+- Vendored `generate_kolmogorov_les.py` from `~/Documents/coding/kolmogorov_generate/dns/` to `scripts/les/generate_kolmogorov_les.py` (commit `af593a5`).
+- Added `--no_dns` mode + `--manual_*` calibration args (commits `87b5fd9` and `1aee204`); previous DNS-calibrated path is preserved.
+- Output npy now records `config['calibration_mode']` ∈ {`stand_alone`, `dns_calibrated`}.
+
+Evidence:
+
+- 8 passing tests in `tests/test_les_generator_no_dns.py` (CLI validation x5, sanity x2, smoke run x1).
+- Smoke test (N=16, T=0.01, ν=1e-4) produces a npy with `calibration_mode='stand_alone'` and matching manual params.
+
+Interpretation:
+
+- Spec `docs/superpowers/specs/2026-05-14-re1e6-les-standalone-generation.md` Sections 2 (generator modifications) and 3 (validation API surface) are now implementable from a deployed copy. Production run on home-gpu is unblocked.
+
+Next:
+
+- Deploy to home-gpu and run smoke + production simulation (Tasks 5–8 of the plan).
+
 ### [2026-05-14] `3492` | 10-point full dual eval (sensor 100k vs no_data 100k) — null result confirmed
 
 - Time: `2026-05-14 20:30 ~ 20:49 +0800`
