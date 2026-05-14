@@ -19,18 +19,21 @@
 
 | Field | Value |
 | :--- | :--- |
-| Status | Running (`2026-05-13 12:13 +0800`) on `acmt20`, 2x RTX 3090 (sharding) |
+| Status | Completed (`2026-05-14 02:45 +0800`, Elapsed `06:32:19`) on `acmt20`, 2x RTX 3090 (sharding) |
 | Config | [paper_repro_soap_sensor100_n512_w50_window1_dw38_100k_eval.py](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/configs/paper_repro_soap_sensor100_n512_w50_window1_dw38_100k_eval.py) |
 | Dataset | [kolmogorov_Re1e6_N512_T5_ds4.npy](/Users/latteine/Documents/coding/jaxpi/examples/kolmogorov_flow/data/kolmogorov_dns/kolmogorov_Re1e6_N512_T5_ds4.npy) |
 | Sensor Constraint | `QR-pivot K100` + fixed `u_data=v_data=38.0614` + `w_data=0` |
 | Time Horizon | `window 1` only, `max_steps=100000` |
-| Checkpoint Policy | `save_every_steps=1000`, `num_keep_ckpts=None` (100 ckpts total) |
+| Checkpoint Policy | `save_every_steps=1000`, `num_keep_ckpts=None` (100 ckpts saved) |
 | Workdir | `/home/junyi/jaxpi/runs/train_kf_w50_w1_dw38_100k_eval_3491` |
-| Ckpt Root | `/home/junyi/jaxpi/re1e6_n512_ds4_soap_sensor100_w50_w1_dw38_100k_eval/ckpt` |
+| Ckpt Root | `/home/junyi/jaxpi/re1e6_n512_ds4_soap_sensor100_w50_w1_dw38_100k_eval/ckpt` (100 ckpts, 1k~100k 每 1000 步) |
 | Wandb | offline run `t3liqvqw`, group `re1e6_window1_fixed_weight_eval` |
 | Predecessor | `3481` (50k) + eval `3489/3490` — sensor 50k 達到 ~no_data 60k 精度，未達 no_data 100k；本實驗將 sensor 延伸到 100k 步驗證是否存在後期加速效應 |
-| Purpose | 回答「sensor 是否在 100k 步上能超越 no-data 100k baseline」 |
-| Expected outcome | 若 sensor 100k 仍 ≈ no_data 100k → sparse sensor 對 window-1 確認沒有 measurable 加速；若 sensor 100k 顯著贏 → 存在後期效應但需要更長訓練 |
+| Eval Job | `3492` (10-pt full dual eval, 10k~100k 兩邊都 ckpt 齊全) |
+| Result @ step 100000 (direct apply_fn) | sensor `(u=1.059e-3, v=1.096e-3, w=0.711e-3)` vs no_data `(u=1.077e-3, v=1.088e-3, w=0.704e-3)` — **差距全部 < 2%，在 noise 範圍內** |
+| Sensor-vs-no_data verdict (100k full) | **NO systematic acceleration**; u/v/w 三維 step-by-step 互有勝負；中期 50k~80k 在 v_err 有 ~10% 優勢但被 no_data 100k 追平；w_err 終值幾乎完全一致 |
+| Anomaly | sensor 10k 在 u/v 上**反而比 no_data 10k 差 +20%/+11%** — 推測 data loss 在早期梯度方向引入非物理約束，拖慢純 PINN 早期收斂 |
+| Final conclusion | sparse QR-pivot K=100 sensor + `dw=38.0614` 在 window-1 + Re=1e6 + 100k 訓練預算下**對 corrected field error 沒有可量測益處**；sweep 3400 residual ranking 與 field quality 完全 decouple — AGENTS.md `Metric_Selection` 紅線的最強案例 |
 | RNG Strategy | Not recorded |
 
 ### `3481` | `re1e6_n512_ds4_soap_sensor100_w50_w1_dw38_eval`
@@ -337,6 +340,72 @@
 - 2026-04-20 已把這兩類假設集中到共用 helper，並要求 config 顯式宣告 `expected_time_remainder`，否則 eval 直接 fail-fast。
 
 ## [LOG] Chronological
+
+### [2026-05-14] `3492` | 10-point full dual eval (sensor 100k vs no_data 100k) — null result confirmed
+
+- Time: `2026-05-14 20:30 ~ 20:49 +0800`
+- Status: COMPLETED (Elapsed `00:19:28`)
+- Experiment or Job ID: `3492` (postprocess)
+
+Change:
+
+- After `3491` produced 100 sensor ckpts (1k~100k), submitted symmetric 10-point dual eval. Both runs have all 10 ckpts at `10k, 20k, ..., 100k`.
+- Output: [eval_runs/dw38_100k_vs_nodata_w1_full_20260514/](/Users/latteine/Documents/coding/jaxpi/eval_runs/dw38_100k_vs_nodata_w1_full_20260514/)
+
+Evidence (window 1, t_local=0.05, direct apply_fn, relative L2):
+
+| step    | no_data (u, v, w) ×1e-3      | sensor (u, v, w) ×1e-3       | sensor 優勢? |
+| ------: | ---------------------------- | ---------------------------- | :----------: |
+|  10 000 | (1.81, 1.69, 2.58)           | (2.16, 1.87, 2.64)           | ❌ +20%/+11%/+2% |
+|  20 000 | (1.30, 1.44, 1.32)           | (1.32, 1.33, 1.37)           | ≈ tie        |
+|  30 000 | (1.37, 1.22, 1.09)           | (1.21, 1.26, 1.04)           | u/w 略好     |
+|  40 000 | (1.07, 1.18, 0.88)           | (1.12, 1.10, 0.88)           | v 略好       |
+|  50 000 | (1.14, 1.20, 0.82)           | (1.12, **1.06**, 0.81)       | v -12%       |
+|  60 000 | (1.22, 1.11, 0.80)           | (1.12, 1.09, **0.76**)       | u/w 略好     |
+|  70 000 | (1.15, 1.28, 0.76)           | (1.17, **1.10**, 0.76)       | v -14%       |
+|  80 000 | (1.12, 1.17, 0.76)           | (1.16, **1.08**, 0.72)       | v/w 略好     |
+|  90 000 | (1.08, 1.11, 0.72)           | (1.15, **1.05**, **0.70**)   | v/w 好 u 略差 |
+| **100 000** | **(1.077, 1.088, 0.704)** | **(1.059, 1.096, 0.711)** | ≈ tie (±2%) |
+
+- 視覺：`checkpoint_sweep_error_vs_step.png` 顯示三分量兩線完全交織；vorticity field PNG 在每個 step 視覺上無法分辨。
+
+Interpretation:
+
+- **無系統性加速**：100k vs 100k 三維差距全部 < 2%，在 step-to-step training noise 範圍內。
+- **早期 (10k) sensor 反而比 no_data 差 +20% (u) / +11% (v)**：推測 data loss 在早期梯度方向引入非物理約束。
+- **中期 (50k~80k) sensor 在 v 上有 10~14% 暫時優勢**，但被 no_data 100k 追平。
+- **w_err 終值幾乎一致** (0.704e-3 vs 0.711e-3，差 1%)；sensor 90k w=0.700e-3 短暫贏，但 sensor 100k 回到 0.711e-3 (noise 變動)。
+- 與 sweep 3400 residual ranking (`dw=38.06` rank-1 first_stable_step=49,400) **完全 decouple**。
+- ⚠️ **研究結論**: sparse QR-pivot K=100 sensor + `dw=38.0614` 在 Re=1e6 window-1 + 100k 預算下**對 corrected field error 沒有可量測益處**。下一步研究方向需要重新設計（見 followup）。
+
+Next:
+
+- 重新思考訓練策略 — sweep metric 應該換 corrected field error 而非 residual; 或者重新審視 sparse sensor 在 cross-window (window 2+) 預測上的可能價值，而非單一 window 內 convergence speed。
+
+### [2026-05-14] `3491` | dw=38.06 100k-step extension training completed
+
+- Time: `2026-05-13 20:12 ~ 2026-05-14 02:45 +0800`
+- Status: COMPLETED (Elapsed `06:32:19`, ExitCode `0`)
+- Experiment or Job ID: `3491`
+
+Change:
+
+- `paper_repro_soap_sensor100_n512_w50_window1_dw38_100k_eval.py` (commit `2f5c096`)：clone of `3481` config with `max_steps=100000`.
+- 100 ckpts written to `/home/junyi/jaxpi/re1e6_n512_ds4_soap_sensor100_w50_w1_dw38_100k_eval/ckpt/time_window_1/` (1k~100k 每 1000 步)。
+- Training stdout shows clean shutdown; final ckpt at step 100000 saved at 18:45.
+
+Evidence:
+
+- 100 個 ckpt 全部存在，1k~100k 每 1000 步間隔。
+- ExitCode 0、Elapsed 6:32:19。
+
+Interpretation:
+
+- Training converged cleanly. Field-quality interpretation 在 eval `3492` 中。
+
+Next:
+
+- Eval submitted as `3492` (10-pt full dual)。
 
 ### [2026-05-13] `3491` | submit dw=38.06 100k-step extension training
 
