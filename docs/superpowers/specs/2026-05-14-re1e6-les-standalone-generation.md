@@ -64,20 +64,28 @@ Three converging reasons motivate a new LES dataset:
 
 ```
 [Mac /Users/latteine/Documents/coding/kolmogorov_generate/dns/]
-    generate_kolmogorov_les.py     ← source of truth, modified here
+    generate_kolmogorov_les.py     ← original source (non-git), vendored unchanged
 
-[home-gpu ~/les-gen/]              ← deployment target
-├── generate_kolmogorov_les.py     ← scp from Mac after modification
-├── validate_les.py                ← new validation script (see below)
-├── .venv/                         ← uv-managed, numpy only
+[Mac /Users/latteine/Documents/coding/jaxpi/]   ← source of truth for modifications
+├── scripts/les/__init__.py        ← package marker
+├── scripts/les/generate_kolmogorov_les.py  ← vendored copy, modified here for --no_dns
+├── scripts/les/validate_les.py    ← new validation script (see below)
+└── tests/test_les_generator_no_dns.py  ← subprocess-driven CLI tests
+
+[home-gpu ~/les-gen/]              ← deployment target (rsync from jaxpi)
+├── generate_kolmogorov_les.py     ← rsync from jaxpi after modification
+├── validate_les.py                ← rsync from jaxpi
+├── .venv/                         ← uv-managed, numpy + matplotlib
 └── output/
-    └── kolmogorov_les_Re1e6_N512_T5.npy
+    ├── kolmogorov_les_Re1e6_N512_T5.npy       ← canonical (T_eddy=1.0)
+    └── kolmogorov_les_Re1e6_N512_T5_retry.npy ← retry evidence (T_eddy=2.0)
 ```
 
-No new repository. Modifications stay in
-`kolmogorov_generate/dns/generate_kolmogorov_les.py` and are tracked
-by that repo's git history. The home-gpu copy is a deployment, not a
-fork.
+The generator is vendored into `jaxpi/scripts/les/` so every
+modification lands as a normal jaxpi commit reviewable via git
+history; the original copy in `kolmogorov_generate/dns/` stays
+untouched. The home-gpu copy is a deployment, not a fork — fresh
+versions are pushed via `rsync` from the jaxpi working tree.
 
 ## Generator modifications (`--no_dns` mode)
 
@@ -353,13 +361,16 @@ does not gate.
 
 ## Deliverables
 
-1. Modified `generate_kolmogorov_les.py` with `--no_dns` mode and
-   matching unit tests, committed to the
-   `kolmogorov_generate` repo.
+1. Vendored `generate_kolmogorov_les.py` plus the `--no_dns` mode and
+   matching unit tests, all committed to the **jaxpi** repo under
+   `scripts/les/` and `tests/test_les_generator_no_dns.py`.
 2. `~/les-gen/` on home-gpu with deployed script, venv,
    smoke-test output, production output, validation outputs.
-3. `~/les-gen/output/kolmogorov_les_Re1e6_N512_T5.npy` (~840 MB)
-   plus `validation_report.txt` and three validation PNGs.
+3. `~/les-gen/output/kolmogorov_les_Re1e6_N512_T5.npy` (404 MB
+   float32; spec originally estimated ~840 MB based on float64)
+   plus `validation_report.txt` and four validation PNGs (KE,
+   enstrophy, spectrum, divergence — divergence added by the
+   revised criteria).
 4. EXPERIMENT_RECORD.md entry under `[LOG] Chronological` noting
    the new dataset, its calibration parameters, and validation
-   outcomes.
+   outcomes under the revised criteria.
