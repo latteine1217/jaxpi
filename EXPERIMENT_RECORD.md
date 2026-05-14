@@ -382,8 +382,21 @@ First run numbers from `validation_report.txt`:
 Interpretation:
 
 - Sub-project A delivered. The dataset is **structurally valid** for Stage-1 PINN training (window-1 only, uses dense LES observations on `t=0..0.05`).
-- Note: The simulation is **sub-equilibrium** (KE achieved ~3.7e-2 vs theoretical 0.5 equilibrium). This is acceptable for Stage-1 use because Stage-1 only consumes the first window's frames as a supervised regression prior; the long-time statistical equilibrium is not part of that prior.
 - Calibration mode is `stand_alone`; no DNS data was touched during generation. The Re=1e5 LES on lab-server (DNS-calibrated) is unaffected.
+
+⚠️ **Sub-equilibrium caveat — must be carried into sub-project B spec:**
+
+This dataset is **not** statistically-converged Re=1e6 turbulence. Three concrete observations:
+
+1. **KE trajectory is in linear-growth phase**, not on a plateau. KE(0)=3.15e-4 → KE(T=5)=3.70e-2, still rising linearly at T_end. Forcing-friction relaxation time `1/r = 10·T_eddy = 10` is twice `T_end`, so equilibrium cannot be reached in this simulation regardless of `--manual_turnover_time`. Final KE is ~7% of theoretical equilibrium 0.5.
+2. **Energy spectrum slope is -3.67**, steeper than canonical 2D forward-cascade -3 and far from -5/3. This indicates hyperviscosity SGS over-dissipates the inertial range relative to fully-developed 2D turbulence (system has not built up enough enstrophy + small-scale activity to balance hyperviscosity drain).
+3. **Original spec KE band [0.4, 0.6] was unreachable** with stand-alone calibration at this T_end. We revised the validation criteria to "no-decay + bounded + divergence < 1e-6", which the dataset passes. This is a deliberate weakening of acceptance, documented in the revised spec and accepted by user 2026-05-15.
+
+Implications for sub-project B:
+
+- **Stage-1 OK if scope is window-1 supervised regression only.** Window-1 (`t=0..0.05`) sits in the early evolution of a random IC and uses dense LES samples as a regression prior, which does not depend on statistical equilibrium. The dataset is fit for purpose at this scope.
+- **Stage-2 must not assume Stage-1 prior represents fully-developed Re=1e6 turbulence.** Stage-2 spec should explicitly state that the Stage-1 weights encode "early-evolution LES at Re=1e6, not equilibrium statistics". Any Stage-2 loss term that implicitly relies on equilibrium (e.g. comparing PINN spectrum to a canonical -5/3) needs to be re-derived from this dataset's actual statistics, not from textbook turbulence.
+- **Cross-Re comparison is fragile.** The lab-server Re=1e5 LES is DNS-calibrated and presumably nearer equilibrium. Direct cross-Re statistical comparisons (e.g. dissipation scaling, energy-spectrum collapse) between Re=1e5 LES and this Re=1e6 LES will be confounded by the sub-equilibrium state, not just by Reynolds number. Avoid such comparisons or document them carefully.
 
 Next:
 
