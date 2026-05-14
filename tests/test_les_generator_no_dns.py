@@ -139,3 +139,18 @@ def test_no_dns_smoke_run(tmp_path):
     omega = np.asarray(payload["omega"])
     assert omega.ndim == 3
     assert omega.shape[1:] == (16, 16)
+
+
+def test_spectrum_slope_helper():
+    """spectrum_slope() should recover -5/3 for an exact power law."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "validate_les",
+        REPO_ROOT / "scripts" / "les" / "validate_les.py",
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    k = np.arange(1, 64, dtype=float)
+    spectrum = k ** (-5.0 / 3.0)
+    slope = mod.spectrum_slope(k, spectrum, k_lo=5.0, k_hi=40.0)
+    assert abs(slope + 5.0 / 3.0) < 0.05, f"expected ~-1.667, got {slope}"
